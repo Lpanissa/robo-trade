@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "Robô Trade",
+    "name": "PanissAsset",
     "slug": "robo-trade",
     "version": "1.0.0",
     "orientation": "default",
@@ -24,8 +24,8 @@
     "web": {
       "output": "single",
       "favicon": "./assets/favicon.png",
-      "name": "Robô Trade",
-      "shortName": "Robô Trade",
+      "name": "PanissAsset",
+      "shortName": "PanissAsset",
       "themeColor": "#10141C",
       "backgroundColor": "#10141C"
     },

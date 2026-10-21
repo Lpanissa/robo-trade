@@ -221,7 +221,8 @@ Deno.serve(async (req) => {
       const qtd = Math.min(6000, Math.ceil((dias * 24) / HORAS[tempo]) + 50);
       const mapa: Record<string, Candle[]> = {};
       for (const p of pares) mapa[p] = (await candles(p, tempo, qtd)).fechados;
-      return json({ ok: true, resultado: backtestBanca(mapa, "rsi") });
+      const max = Math.max(1, Math.min(pares.length, Number(u.searchParams.get("max") ?? 1) || 1));
+      return json({ ok: true, resultado: backtestBanca(mapa, "rsi", 1000, max) });
     }
     if (acao === "testar_conta") return json({ ok: true, conta: await testarConta("testnet") });
     return json({ ok: false, erro: "Ação desconhecida" }, 400);

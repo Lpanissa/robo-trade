@@ -198,9 +198,10 @@ export function escolherEntrada(sinaisCompra: { par: string; rsi: number | null 
   return [...sinaisCompra].sort((a, b) => (a.rsi ?? 50) - (b.rsi ?? 50))[0].par;
 }
 
-export function backtestBanca(mapa: Record<string, Candle[]>, estrategia: Estrategia, saldo = 1000) {
+export function backtestBanca(mapa: Record<string, Candle[]>, estrategia: Estrategia, saldo = 1000, maxPosicoes = 1) {
+  // maxPosicoes: em quantas moedas ao mesmo tempo a banca pode estar.
+  // Cada entrada usa o dinheiro livre dividido pelas vagas que sobram.
   const pares = Object.keys(mapa);
-  // Só usa os horários que existem em todas as moedas
   const tempos = pares.map((p) => new Set(mapa[p].map((k) => k.t)));
   const comuns = mapa[pares[0]].map((k) => k.t).filter((t) => tempos.every((s) => s.has(t)));
   const info: Record<string, { idx: Map<number, number>; fech: number[]; sinais: Sinal[]; rsi: (number | null)[] }> = {};
@@ -208,28 +209,38 @@ export function backtestBanca(mapa: Record<string, Candle[]>, estrategia: Estrat
     const fech = mapa[p].map((k) => k.c);
     info[p] = { idx: new Map(mapa[p].map((k, i) => [k.t, i])), fech, sinais: calcularSinais(fech, estrategia).sinais, rsi: rsi(fech, 14) };
   }
-  let caixa = saldo, qtd = 0, atual: string | null = null, compraCaixa = 0, compraPreco = 0, compraT = 0;
+  let caixa = saldo;
+  const abertas = new Map<string, { qtd: number; custo: number; preco: number; t: number }>();
   const ops: { par: string; compra_em: number; compra_preco: number; venda_em: number; venda_preco: number; resultado_pct: number }[] = [];
   const patrimonio: number[] = [];
-  let pico = saldo, maiorQueda = 0;
+  let pico = saldo, maiorQueda = 0, maxJuntas = 0;
+  const preco = (p: string, t: number) => info[p].fech[info[p].idx.get(t)!];
   for (const t of comuns) {
-    if (atual) {
-      const d = info[atual], i = d.idx.get(t)!;
-      if (d.sinais[i] === "venda") {
-        caixa = qtd * d.fech[i] * (1 - TAXA);
-        ops.push({ par: atual, compra_em: compraT, compra_preco: compraPreco, venda_em: t, venda_preco: d.fech[i], resultado_pct: (caixa / compraCaixa - 1) * 100 });
-        qtd = 0; atual = null;
-      }
-    } else {
-      const cands = pares.filter((p) => info[p].sinais[info[p].idx.get(t)!] === "compra").map((p) => ({ par: p, rsi: info[p].rsi[info[p].idx.get(t)!] }));
-      const p = escolherEntrada(cands);
-      if (p) {
-        const i = info[p].idx.get(t)!;
-        atual = p; compraCaixa = caixa; compraPreco = info[p].fech[i]; compraT = t;
-        qtd = (caixa * (1 - TAXA)) / compraPreco; caixa = 0;
+    // 1) vende as que deram sinal de venda
+    for (const [p, pos] of [...abertas]) {
+      if (info[p].sinais[info[p].idx.get(t)!] === "venda") {
+        const valor = pos.qtd * preco(p, t) * (1 - TAXA);
+        caixa += valor;
+        ops.push({ par: p, compra_em: pos.t, compra_preco: pos.preco, venda_em: t, venda_preco: preco(p, t), resultado_pct: (valor / pos.custo - 1) * 100 });
+        abertas.delete(p);
       }
     }
-    const pat = atual ? qtd * info[atual].fech[info[atual].idx.get(t)!] : caixa;
+    // 2) entra nas que deram sinal de compra, enquanto houver vaga (RSI mais baixo primeiro)
+    const cands = pares
+      .filter((p) => !abertas.has(p) && info[p].sinais[info[p].idx.get(t)!] === "compra")
+      .map((p) => ({ par: p, rsi: info[p].rsi[info[p].idx.get(t)!] }))
+      .sort((a, b) => (a.rsi ?? 50) - (b.rsi ?? 50));
+    for (const c of cands) {
+      const vagas = maxPosicoes - abertas.size;
+      if (vagas <= 0 || caixa <= 1) break;
+      const custo = caixa / vagas;
+      const pr = preco(c.par, t);
+      abertas.set(c.par, { qtd: (custo * (1 - TAXA)) / pr, custo, preco: pr, t });
+      caixa -= custo;
+    }
+    maxJuntas = Math.max(maxJuntas, abertas.size);
+    let pat = caixa;
+    for (const [p, pos] of abertas) pat += pos.qtd * preco(p, t);
     patrimonio.push(pat);
     if (pat > pico) pico = pat;
     maiorQueda = Math.max(maiorQueda, (1 - pat / pico) * 100);
@@ -254,6 +265,8 @@ export function backtestBanca(mapa: Record<string, Candle[]>, estrategia: Estrat
   }
   return {
     pares,
+    max_posicoes: maxPosicoes,
+    max_juntas: maxJuntas,
     inicio: comuns[0] ?? null,
     fim: comuns[comuns.length - 1] ?? null,
     saldo_inicial: saldo,
@@ -262,7 +275,7 @@ export function backtestBanca(mapa: Record<string, Candle[]>, estrategia: Estrat
     operacoes: ops.length,
     acertos_pct: ops.length ? round((ops.filter((o) => o.resultado_pct > 0).length / ops.length) * 100) : 0,
     maior_queda_pct: round(maiorQueda),
-    posicao_aberta: atual,
+    posicoes_abertas: [...abertas.keys()],
     por_moeda: porMoeda,
     mensal,
     lista: ops.slice(-40).reverse().map((o) => ({ ...o, resultado_pct: round(o.resultado_pct) })),

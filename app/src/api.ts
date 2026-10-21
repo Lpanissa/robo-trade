@@ -22,6 +22,9 @@ export type Carteira = {
   indicadores: { media_rapida?: number | null; media_lenta?: number | null; rsi?: number | null; sinal_ultimo_candle?: string | null } | null;
   criado_em: string;
   atualizado_em: string;
+  modo: "simulado" | "testnet" | "real";
+  erro: string | null;
+  limite_perda_dia: number | null;
 };
 
 export type Operacao = {
@@ -75,6 +78,8 @@ export async function buscarCarteiras(): Promise<Carteira[]> {
     qtd: Number(c.qtd),
     compra_preco: num(c.compra_preco),
     ultimo_preco: num(c.ultimo_preco),
+    limite_perda_dia: num(c.limite_perda_dia),
+    modo: c.modo ?? "simulado",
   }));
 }
 

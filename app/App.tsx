@@ -151,6 +151,9 @@ function CarteiraCard({ c, t, s, ops }: { c: Carteira; t: Tema; s: Estilos; ops:
         <View style={{ flex: 1 }}>
           <Text style={s.cartaoTitulo}>{NOME_ESTRATEGIA[c.estrategia]}</Text>
           <Text style={s.textoSuave}>{c.par.replace("USDT", "")} · vela de {NOME_TEMPO[c.tempo] ?? c.tempo}</Text>
+          <Text style={[s.modo, { color: c.modo === "simulado" ? t.suave : t.acento }]}>
+            {c.modo === "testnet" ? "Binance Testnet · ordens de verdade com dinheiro de teste" : c.modo === "real" ? "Binance · conta real" : "Só anotando (sem ordens)"}
+          </Text>
         </View>
         <View style={[s.pilula, { backgroundColor: comprado ? t.altaFraca : t.painel2 }]}>
           <View style={[s.ponto, { backgroundColor: comprado ? t.alta : t.suave }]} />
@@ -163,6 +166,18 @@ function CarteiraCard({ c, t, s, ops }: { c: Carteira; t: Tema; s: Estilos; ops:
         <Numero s={s} rotulo="Resultado" valor={pct(lucro)} cor={corDoNumero(t, Math.round(lucro * 10) / 10)} />
         <Numero s={s} rotulo="Operações" valor={`${vendas.length}${vendas.length ? ` · ${acertos} certas` : ""}`} />
       </View>
+
+      {c.erro && (
+        <View style={[s.indicador, { backgroundColor: t.baixaFraca }]}>
+          <Text style={[s.textoNormal, { color: t.baixa }]}>{c.erro}</Text>
+        </View>
+      )}
+
+      {c.modo !== "simulado" && c.limite_perda_dia != null && (
+        <Text style={s.textoSuave}>
+          Usa até {dinheiro(c.saldo_inicial)} por operação. Para de comprar no dia se perder {dinheiro(c.limite_perda_dia)}.
+        </Text>
+      )}
 
       {comprado && (
         <Text style={s.textoNormal}>
@@ -498,6 +513,7 @@ function estilos(t: Tema) {
     painel: { backgroundColor: t.painel, borderRadius: 14, borderWidth: 1, borderColor: t.borda, padding: 14 },
     cartao: { flex: 1, gap: 12 },
     cartaoTitulo: { color: t.texto, fontSize: 17, fontWeight: "700" },
+    modo: { fontSize: 12, fontWeight: "700", marginTop: 3 },
     linhaEntre: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", gap: 8 },
     pilula: { flexDirection: "row", alignItems: "center", gap: 6, borderRadius: 99, paddingHorizontal: 10, paddingVertical: 5 },
     pilulaTexto: { fontSize: 12.5, fontWeight: "700" },

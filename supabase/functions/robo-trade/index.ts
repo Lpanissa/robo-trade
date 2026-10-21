@@ -1,7 +1,8 @@
 // Robô Trade — roda na nuvem (Supabase) a cada 5 minutos.
-// Lê o histórico de preços da Binance (dados públicos), decide compra/venda
-// e registra numa carteira SIMULADA. Não envia ordens para nenhuma corretora.
+// Lê o histórico de preços da Binance (dados públicos) e decide compra/venda.
+// Carteiras "simulado" só anotam; carteiras "testnet" mandam ordens na Binance Testnet.
 import { backtest, calcularSinais, Candle, Estrategia, ESTRATEGIAS, motivo, TAXA } from "./logica.ts";
+import { comprar, temChaves, testarConta, vender } from "./binance.ts";
 
 const URL_SB = Deno.env.get("SUPABASE_URL")!;
 const CHAVE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -69,6 +70,21 @@ async function testarHistorico(par: string, tempo: string, salvar = true) {
   return resultado;
 }
 
+// Quanto essa carteira perdeu hoje (horário de Brasília), em USDT
+async function perdaDoDia(carteira: string) {
+  const inicio = new Date(Date.now() - 3 * 3600_000);
+  inicio.setUTCHours(0, 0, 0, 0);
+  const desde = new Date(inicio.getTime() + 3 * 3600_000).toISOString();
+  const vendas = await db(`robo_operacoes?carteira=eq.${encodeURIComponent(carteira)}&tipo=eq.venda&em=gte.${desde}&select=valor,resultado_pct`);
+  let lucro = 0;
+  for (const v of vendas ?? []) {
+    if (v.resultado_pct == null) continue;
+    const compra = Number(v.valor) / (1 + Number(v.resultado_pct) / 100);
+    lucro += Number(v.valor) - compra;
+  }
+  return lucro < 0 ? -lucro : 0;
+}
+
 async function rodar() {
   const carteiras = await db("robo_carteiras?ativo=eq.true&select=*");
   const cache = new Map<string, Awaited<ReturnType<typeof candles>>>();
@@ -89,8 +105,40 @@ async function rodar() {
     const ultimo = fechados[fechados.length - 1].t;
     const novas: Record<string, unknown>[] = [];
 
-    // Primeira vez: só marca onde começou, não opera o passado
-    if (c.ultimo_candle != null) {
+    let erro: string | null = null;
+    const modo = c.modo ?? "simulado";
+
+    if (modo !== "simulado") {
+      // Binance (Testnet): só age na vela que acabou de fechar, nunca no passado
+      erro = temChaves(modo);
+      const iU = fechados.length - 1;
+      if (!erro && c.ultimo_candle != null && fechados[iU].t > Number(c.ultimo_candle)) {
+        const s = sinais[iU];
+        const quando = new Date().toISOString();
+        try {
+          if (s === "compra" && qtd === 0 && caixa > 0) {
+            const perdaHoje = await perdaDoDia(c.id);
+            if (c.limite_perda_dia != null && perdaHoje >= Number(c.limite_perda_dia)) {
+              erro = `Limite de perda do dia atingido (US$ ${perdaHoje.toFixed(2)}). Compras pausadas até amanhã.`;
+            } else {
+              const r = await comprar(modo, c.par, caixa);
+              compraCaixa = r.valor; compraPreco = r.preco; compraEm = quando;
+              caixa = Math.max(0, caixa - r.valor); qtd = r.qtd;
+              novas.push({ carteira: c.id, modo, tipo: "compra", preco: r.preco, qtd: r.qtd, valor: r.valor, ordem_id: r.ordem_id, motivo: motivo(c.estrategia, "compra", ind(iU)), em: quando });
+            }
+          } else if (s === "venda" && qtd > 0) {
+            const r = await vender(modo, c.par, qtd);
+            caixa += r.valor;
+            const pctOp = compraCaixa ? (r.valor / compraCaixa - 1) * 100 : null;
+            novas.push({ carteira: c.id, modo, tipo: "venda", preco: r.preco, qtd: r.bruto, valor: r.valor, resultado_pct: pctOp, ordem_id: r.ordem_id, motivo: motivo(c.estrategia, "venda", ind(iU)), em: quando });
+            qtd = 0; compraPreco = null; compraCaixa = null; compraEm = null;
+          }
+        } catch (e) {
+          erro = (e as Error).message;
+        }
+      }
+    } else if (c.ultimo_candle != null) {
+      // Simulado. Primeira vez: só marca onde começou, não opera o passado
       for (let i = 0; i < fechados.length; i++) {
         if (fechados[i].t <= Number(c.ultimo_candle)) continue;
         const s = sinais[i], p = fech[i];
@@ -115,7 +163,7 @@ async function rodar() {
       method: "PATCH",
       body: JSON.stringify({
         caixa, qtd, compra_preco: compraPreco, compra_caixa: compraCaixa, compra_em: compraEm,
-        ultimo_candle: ultimo, ultimo_preco: atual,
+        ultimo_candle: ultimo, ultimo_preco: atual, erro,
         indicadores: { ...ind(iUlt), sinal_ultimo_candle: sinais[iUlt] },
         atualizado_em: new Date().toISOString(),
       }),
@@ -148,6 +196,7 @@ Deno.serve(async (req) => {
       if (!/^[A-Z0-9]{2,12}USDT$/.test(par) || !TEMPOS.includes(tempo)) return json({ ok: false, erro: "Moeda ou tempo inválido" }, 400);
       return json({ ok: true, resultado: await testarHistorico(par, tempo) });
     }
+    if (acao === "testar_conta") return json({ ok: true, conta: await testarConta("testnet") });
     return json({ ok: false, erro: "Ação desconhecida" }, 400);
   } catch (e) {
     return json({ ok: false, erro: (e as Error).message }, 500);

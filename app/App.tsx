@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { ActivityIndicator, Platform, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View, useWindowDimensions } from "react-native";
+import { ActivityIndicator, AppState, Platform, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View, useWindowDimensions } from "react-native";
 import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
 import { StatusBar } from "expo-status-bar";
 import Svg, { Path, Rect } from "react-native-svg";
@@ -8,6 +8,7 @@ import {
   NOME_ESTRATEGIA, NOME_TEMPO, numero, Operacao, pct, Teste,
 } from "./src/api";
 import Grafico from "./src/Grafico";
+import { Atualizacao, baixarAtualizacao, ouvirToqueNaNotificacao, procurarAtualizacao } from "./src/atualizacao";
 import { corDoNumero, Tema, useTema } from "./src/tema";
 
 type Aba = "agora" | "historico";
@@ -32,6 +33,17 @@ function Tela() {
   const { width } = useWindowDimensions();
   const largo = width >= 900;
   const [aba, setAba] = useState<Aba>("agora");
+  const [atualizacao, setAtualizacao] = useState<Atualizacao | null>(null);
+
+  // Procura versão nova ao abrir, ao voltar para o app e a cada 30 minutos
+  useEffect(() => {
+    const checar = () => procurarAtualizacao().then(setAtualizacao);
+    checar();
+    const id = setInterval(checar, 30 * 60 * 1000);
+    const sub = AppState.addEventListener("change", (e) => e === "active" && checar());
+    const pararToque = ouvirToqueNaNotificacao();
+    return () => { clearInterval(id); sub.remove(); pararToque(); };
+  }, []);
 
   return (
     <SafeAreaView style={[s.raiz]} edges={["top", "left", "right"]}>
@@ -48,6 +60,17 @@ function Tela() {
             <Text style={[s.seloTexto, { color: t.acento }]}>Simulado</Text>
           </View>
         </View>
+        {atualizacao && (
+          <Pressable onPress={baixarAtualizacao} style={s.avisoAtualizacao} accessibilityRole="button">
+            <View style={{ flex: 1 }}>
+              <Text style={s.avisoTitulo}>Atualização disponível</Text>
+              <Text style={s.textoSuave}>Toque para baixar a versão nova e instalar.</Text>
+            </View>
+            <View style={s.avisoBotao}>
+              <Text style={s.botaoTexto}>Baixar</Text>
+            </View>
+          </Pressable>
+        )}
         <View style={s.abas}>
           {(["agora", "historico"] as Aba[]).map((a) => (
             <Pressable key={a} onPress={() => setAba(a)} style={[s.aba, aba === a && s.abaAtiva]} accessibilityRole="tab">
@@ -538,6 +561,9 @@ function estilos(t: Tema) {
     legendaLinha: { flexDirection: "row", gap: 16, flexWrap: "wrap" },
     botao: { backgroundColor: t.acento, borderRadius: 12, paddingVertical: 13, alignItems: "center" },
     botaoTexto: { color: t.escuro ? "#1A1206" : "#FFFFFF", fontWeight: "700", fontSize: 15 },
+    avisoAtualizacao: { flexDirection: "row", alignItems: "center", gap: 12, backgroundColor: t.acentoFraco, borderColor: t.acento, borderWidth: 1, borderRadius: 12, padding: 12, marginBottom: 10 },
+    avisoTitulo: { color: t.texto, fontWeight: "700", fontSize: 14.5 },
+    avisoBotao: { backgroundColor: t.acento, borderRadius: 9, paddingHorizontal: 14, paddingVertical: 8 },
     botaoPequeno: { marginTop: 6, borderWidth: 1, borderColor: t.borda, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 4 },
     botaoPequenoTexto: { color: t.texto, fontSize: 12.5, fontWeight: "600" },
   });

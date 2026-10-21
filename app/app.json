@@ -31,6 +31,9 @@
     },
     "experiments": {
       "baseUrl": "/robo-trade"
-    }
+    },
+    "plugins": [
+      "expo-notifications"
+    ]
   }
 }

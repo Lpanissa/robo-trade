@@ -6,7 +6,7 @@ const CHAVE =
 
 const cab = { apikey: CHAVE, Authorization: `Bearer ${CHAVE}` };
 
-export type Estrategia = "medias" | "rsi";
+export type Estrategia = "medias" | "rsi" | "combo";
 
 export type Carteira = {
   id: string;
@@ -91,8 +91,8 @@ export async function buscarOperacoes(): Promise<Operacao[]> {
 // Teste no histórico. Primeiro tenta o que o robô já guardou; senão pede um teste novo.
 export async function buscarTeste(par: string, tempo: string, forcar = false): Promise<Record<Estrategia, Teste>> {
   if (!forcar) {
-    const l = await ler<{ id: string; resultado: Teste }[]>(`robo_backtest?select=id,resultado&id=in.(medias_${par}_${tempo},rsi_${par}_${tempo})`);
-    if (l.length === 2) {
+    const l = await ler<{ id: string; resultado: Teste }[]>(`robo_backtest?select=id,resultado&id=in.(medias_${par}_${tempo},rsi_${par}_${tempo},combo_${par}_${tempo})`);
+    if (l.length === 3) {
       const o: any = {};
       for (const x of l) o[x.resultado.estrategia] = x.resultado;
       return o;
@@ -117,7 +117,7 @@ export const dataHora = (d: string | number) => {
 };
 export const data = (d: string | number) => new Date(d).toLocaleDateString("pt-BR", { day: "2-digit", month: "short", year: "2-digit" });
 
-export const NOME_ESTRATEGIA: Record<Estrategia, string> = { medias: "Médias 9/21", rsi: "RSI 14" };
+export const NOME_ESTRATEGIA: Record<Estrategia, string> = { medias: "Médias 9/21", rsi: "RSI 14", combo: "Médias + RSI" };
 export const NOME_TEMPO: Record<string, string> = { "15m": "15 min", "1h": "1 hora", "4h": "4 horas", "1d": "1 dia" };
 export const MOEDAS = [
   { par: "BTCUSDT", nome: "Bitcoin" },

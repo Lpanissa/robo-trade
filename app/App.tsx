@@ -15,6 +15,7 @@ type Aba = "agora" | "historico";
 const REGRA: Record<Estrategia, string> = {
   medias: "Compra quando a média de 9 velas cruza para cima da média de 21. Vende quando cruza para baixo.",
   rsi: "Compra quando o RSI cai abaixo de 30 (caiu demais). Vende quando passa de 70 (subiu demais).",
+  combo: "Compra quando a média de 9 cruza para cima da de 21 e o RSI está abaixo de 65. Vende quando o RSI passa de 70 ou as médias cruzam para baixo.",
 };
 
 export default function App() {
@@ -186,9 +187,8 @@ function CarteiraCard({ c, t, s, ops }: { c: Carteira; t: Tema; s: Estilos; ops:
         </Text>
       )}
 
-      {c.estrategia === "rsi" ? (
-        <BarraRsi t={t} s={s} valor={ind.rsi ?? null} />
-      ) : (
+      {c.estrategia !== "medias" && <BarraRsi t={t} s={s} valor={ind.rsi ?? null} />}
+      {c.estrategia !== "rsi" && (
         <View style={s.indicador}>
           <Text style={s.rotulo}>Médias agora</Text>
           <Text style={s.textoNormal}>
@@ -277,7 +277,7 @@ function Historico({ t, s, largo }: { t: Tema; s: Estilos; largo: boolean }) {
 
   const teste = testes?.[ver];
   const melhor = testes
-    ? ([["medias", testes.medias.resultado_pct], ["rsi", testes.rsi.resultado_pct], ["segurar", testes.rsi.segurar_pct]] as [string, number][]).sort((a, b) => b[1] - a[1])[0][0]
+    ? ([["medias", testes.medias.resultado_pct], ["rsi", testes.rsi.resultado_pct], ["combo", testes.combo?.resultado_pct ?? -Infinity], ["segurar", testes.rsi.segurar_pct]] as [string, number][]).sort((a, b) => b[1] - a[1])[0][0]
     : null;
 
   const marcas = useMemo(() => {
@@ -327,7 +327,7 @@ function Historico({ t, s, largo }: { t: Tema; s: Estilos; largo: boolean }) {
                 <Text style={[s.tabCel, s.tabCab]}>Acertos</Text>
                 <Text style={[s.tabCel, s.tabCab]}>Maior queda</Text>
               </View>
-              {(["medias", "rsi"] as Estrategia[]).map((e) => {
+              {(["medias", "rsi", "combo"] as Estrategia[]).filter((e) => testes[e]).map((e) => {
                 const r = testes[e];
                 return (
                   <Pressable key={e} onPress={() => setVer(e)} style={[s.tabLinha, ver === e && { backgroundColor: t.acentoFraco }]}>
@@ -438,7 +438,7 @@ function abreviar(n: number) {
 
 function Numero({ s, rotulo, valor, cor }: { s: Estilos; rotulo: string; valor: string; cor?: string }) {
   return (
-    <View style={{ flex: 1, minWidth: 96 }}>
+    <View style={{ flexGrow: 1, minWidth: 118 }}>
       <Text style={s.rotulo}>{rotulo}</Text>
       <Text style={[s.numero, cor ? { color: cor } : null]}>{valor}</Text>
     </View>

@@ -13,7 +13,7 @@ permissions:
 
 concurrency:
   group: gerar-apps
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   android:

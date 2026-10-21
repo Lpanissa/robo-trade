@@ -5,7 +5,7 @@ export const TAXA = 0.001; // 0,1% por operação (taxa padrão da Binance)
 
 export type Candle = { t: number; c: number };
 export type Sinal = "compra" | "venda" | null;
-export type Estrategia = "medias" | "rsi";
+export type Estrategia = "medias" | "rsi" | "combo";
 
 export const ESTRATEGIAS: Record<Estrategia, { nome: string; regra: string }> = {
   medias: {
@@ -15,6 +15,10 @@ export const ESTRATEGIAS: Record<Estrategia, { nome: string; regra: string }> = 
   rsi: {
     nome: "RSI 14",
     regra: "Compra quando o RSI fica abaixo de 30 (caiu demais); vende quando passa de 70 (subiu demais).",
+  },
+  combo: {
+    nome: "Médias + RSI",
+    regra: "Compra quando a média de 9 cruza para cima da de 21 e o RSI está abaixo de 65; vende quando o RSI passa de 70 ou as médias cruzam para baixo.",
   },
 };
 
@@ -62,6 +66,18 @@ export function calcularSinais(fech: number[], estrategia: Estrategia) {
     const ind = (i: number) => ({ media_rapida: r[i], media_lenta: l[i] });
     return { sinais, ind };
   }
+  if (estrategia === "combo") {
+    // Médias decidem a entrada; RSI evita comprar "esticado" e realiza o lucro cedo
+    const r = mediaMovel(fech, 9), l = mediaMovel(fech, 21), x = rsi(fech, 14);
+    for (let i = 1; i < fech.length; i++) {
+      const a = r[i - 1], b = l[i - 1], c = r[i], d = l[i], v = x[i];
+      if (a == null || b == null || c == null || d == null || v == null) continue;
+      if (a <= b && c > d && v < 65) sinais[i] = "compra";
+      else if ((a >= b && c < d) || v > 70) sinais[i] = "venda";
+    }
+    const ind = (i: number) => ({ media_rapida: r[i], media_lenta: l[i], rsi: x[i] });
+    return { sinais, ind };
+  }
   const x = rsi(fech, 14);
   for (let i = 0; i < fech.length; i++) {
     const v = x[i];
@@ -75,6 +91,10 @@ export function calcularSinais(fech: number[], estrategia: Estrategia) {
 
 export function motivo(estrategia: Estrategia, tipo: "compra" | "venda", ind: Record<string, number | null>) {
   const f = (n: number | null | undefined, d = 0) => (n == null ? "-" : n.toLocaleString("pt-BR", { maximumFractionDigits: d }));
+  if (estrategia === "combo") {
+    if (tipo === "compra") return `Média 9 cruzou para cima da 21 com RSI em ${f(ind.rsi, 1)}`;
+    return (ind.rsi ?? 0) > 70 ? `RSI em ${f(ind.rsi, 1)}, acima de 70: lucro realizado` : `Média 9 cruzou para baixo da 21`;
+  }
   if (estrategia === "medias") {
     return tipo === "compra"
       ? `Média 9 (${f(ind.media_rapida)}) cruzou para cima da média 21 (${f(ind.media_lenta)})`

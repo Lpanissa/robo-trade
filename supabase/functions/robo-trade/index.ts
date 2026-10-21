@@ -85,6 +85,94 @@ async function testarHistorico(par: string, tempo: string, salvar = true, dias =
   return resultado;
 }
 
+// Banca única para várias moedas (até max_posicoes ao mesmo tempo).
+// Só age na vela que acabou de fechar. Primeiro vende o que deu sinal de venda,
+// depois compra as que deram sinal (RSI mais baixo primeiro), dividindo o dinheiro livre pelas vagas.
+async function rodarBanca(c: any, cache: Map<string, Awaited<ReturnType<typeof candles>>>) {
+  const pares: string[] = String(c.par).split(",");
+  const modo = c.modo ?? "simulado";
+  const max = Number(c.max_posicoes ?? 1);
+  const dados: Record<string, { fechados: Candle[]; atual: number; sinal: string | null; rsi: number | null; t: number }> = {};
+  for (const p of pares) {
+    const chave = `${p}_${c.tempo}`;
+    if (!cache.has(chave)) cache.set(chave, await candles(p, c.tempo));
+    const { fechados, atual } = cache.get(chave)!;
+    const fech = fechados.map((k) => k.c);
+    const { sinais, ind } = calcularSinais(fech, c.estrategia as Estrategia);
+    const i = fechados.length - 1;
+    dados[p] = { fechados, atual, sinal: sinais[i], rsi: (ind(i) as any).rsi ?? null, t: fechados[i].t };
+  }
+  const ultimo = Math.min(...pares.map((p) => dados[p].t));
+  let caixa = Number(c.caixa);
+  const posicoes: Record<string, { qtd: number; custo: number; preco: number; em: string }> = { ...(c.posicoes ?? {}) };
+  const novas: Record<string, unknown>[] = [];
+  let erro: string | null = modo === "simulado" ? null : temChaves(modo);
+
+  if (!erro && c.ultimo_candle != null && ultimo > Number(c.ultimo_candle)) {
+    const quando = new Date().toISOString();
+    try {
+      // 1) vendas
+      for (const p of Object.keys(posicoes)) {
+        if (dados[p]?.sinal !== "venda") continue;
+        const pos = posicoes[p];
+        let valor: number, preco: number, qtdVendida: number, ordem: string | null = null;
+        if (modo === "simulado") {
+          preco = dados[p].atual; qtdVendida = pos.qtd; valor = pos.qtd * preco * (1 - TAXA);
+        } else {
+          const r = await vender(modo, p, pos.qtd);
+          valor = r.valor; preco = r.preco; qtdVendida = r.bruto; ordem = r.ordem_id;
+        }
+        caixa += valor;
+        novas.push({ carteira: c.id, modo, par: p, tipo: "venda", preco, qtd: qtdVendida, valor, resultado_pct: (valor / pos.custo - 1) * 100, ordem_id: ordem, motivo: motivo(c.estrategia, "venda", { rsi: dados[p].rsi }), em: quando });
+        delete posicoes[p];
+      }
+      // 2) compras
+      const cands = pares
+        .filter((p) => !posicoes[p] && dados[p].sinal === "compra")
+        .sort((a, b) => (dados[a].rsi ?? 50) - (dados[b].rsi ?? 50));
+      if (cands.length) {
+        const perdaHoje = await perdaDoDia(c.id);
+        if (c.limite_perda_dia != null && perdaHoje >= Number(c.limite_perda_dia)) {
+          erro = `Limite de perda do dia atingido (US$ ${perdaHoje.toFixed(2)}). Compras pausadas até amanhã.`;
+        } else {
+          for (const p of cands) {
+            const vagas = max - Object.keys(posicoes).length;
+            if (vagas <= 0) break;
+            const valorUsar = Math.floor((caixa / vagas) * 100) / 100;
+            if (valorUsar < 10) break;
+            let qtd: number, preco: number, gasto: number, ordem: string | null = null;
+            if (modo === "simulado") {
+              preco = dados[p].atual; gasto = valorUsar; qtd = (valorUsar * (1 - TAXA)) / preco;
+            } else {
+              const r = await comprar(modo, p, valorUsar);
+              qtd = r.qtd; preco = r.preco; gasto = r.valor; ordem = r.ordem_id;
+            }
+            caixa = Math.max(0, caixa - gasto);
+            posicoes[p] = { qtd, custo: gasto, preco, em: quando };
+            novas.push({ carteira: c.id, modo, par: p, tipo: "compra", preco, qtd, valor: gasto, ordem_id: ordem, motivo: motivo(c.estrategia, "compra", { rsi: dados[p].rsi }), em: quando });
+          }
+        }
+      }
+    } catch (e) {
+      erro = (e as Error).message;
+    }
+  }
+
+  if (novas.length) await db("robo_operacoes", { method: "POST", body: JSON.stringify(novas), headers: { Prefer: "return=minimal" } });
+  const precos: Record<string, number> = {}, rsis: Record<string, number | null> = {}, sinaisAgora: Record<string, string | null> = {};
+  for (const p of pares) { precos[p] = dados[p].atual; rsis[p] = dados[p].rsi; sinaisAgora[p] = dados[p].sinal; }
+  await db(`robo_carteiras?id=eq.${encodeURIComponent(c.id)}`, {
+    method: "PATCH",
+    body: JSON.stringify({
+      caixa, posicoes, qtd: Object.keys(posicoes).length, ultimo_candle: ultimo, erro,
+      indicadores: { precos, rsi: rsis, sinais: sinaisAgora },
+      atualizado_em: new Date().toISOString(),
+    }),
+    headers: { Prefer: "return=minimal" },
+  });
+  return { carteira: c.id, novas_operacoes: novas.length, posicoes: Object.keys(posicoes), erro };
+}
+
 // Quanto essa carteira perdeu hoje (horário de Brasília), em USDT
 async function perdaDoDia(carteira: string) {
   const inicio = new Date(Date.now() - 3 * 3600_000);
@@ -106,6 +194,14 @@ async function rodar() {
   const resumo: unknown[] = [];
 
   for (const c of carteiras) {
+    if (String(c.par).includes(",")) {
+      try {
+        resumo.push(await rodarBanca(c, cache));
+      } catch (e) {
+        resumo.push({ carteira: c.id, erro: (e as Error).message });
+      }
+      continue;
+    }
     const chave = `${c.par}_${c.tempo}`;
     if (!cache.has(chave)) cache.set(chave, await candles(c.par, c.tempo));
     const { fechados, atual } = cache.get(chave)!;
@@ -184,10 +280,10 @@ async function rodar() {
       }),
       headers: { Prefer: "return=minimal" },
     });
-    resumo.push({ carteira: c.id, novas_operacoes: novas.length, preco: atual, posicao: qtd > 0 ? "comprado" : "fora" });
+    resumo.push({ carteira: c.id, novas_operacoes: novas.length, preco: atual, posicao: qtd > 0 ? "comprado" : "fora", erro });
   }
 
-  // Atualiza o teste no histórico de cada par/tempo das carteiras
+  // Atualiza o teste no histórico de cada par/tempo usado
   for (const chave of cache.keys()) {
     const [par, tempo] = chave.split("_");
     const { fechados } = cache.get(chave)!;

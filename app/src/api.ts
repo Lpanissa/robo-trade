@@ -25,11 +25,24 @@ export type Carteira = {
   modo: "simulado" | "testnet" | "real";
   erro: string | null;
   limite_perda_dia: number | null;
+  max_posicoes: number;
+  posicoes: Record<string, { qtd: number; custo: number; preco: number; em: string }>;
 };
+
+// Banca única: a carteira tem várias moedas no campo par, separadas por vírgula
+export const ehBanca = (c: Carteira) => c.par.includes(",");
+
+// Quanto a carteira vale agora (dinheiro livre + moedas compradas)
+export function valorAtual(c: Carteira) {
+  if (!ehBanca(c)) return c.caixa + c.qtd * (c.ultimo_preco ?? 0);
+  const precos = ((c.indicadores as any)?.precos ?? {}) as Record<string, number>;
+  return c.caixa + Object.entries(c.posicoes ?? {}).reduce((a, [p, pos]) => a + pos.qtd * (precos[p] ?? pos.preco), 0);
+}
 
 export type Operacao = {
   id: number;
   carteira: string;
+  par: string | null;
   tipo: "compra" | "venda";
   preco: number;
   qtd: number;
@@ -80,6 +93,8 @@ export async function buscarCarteiras(): Promise<Carteira[]> {
     ultimo_preco: num(c.ultimo_preco),
     limite_perda_dia: num(c.limite_perda_dia),
     modo: c.modo ?? "simulado",
+    max_posicoes: Number(c.max_posicoes ?? 1),
+    posicoes: c.posicoes ?? {},
   }));
 }
 

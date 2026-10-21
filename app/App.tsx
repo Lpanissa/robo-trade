@@ -4,7 +4,7 @@ import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
 import { StatusBar } from "expo-status-bar";
 import Svg, { Path, Rect } from "react-native-svg";
 import {
-  buscarCarteiras, buscarOperacoes, buscarTeste, Carteira, data, dataHora, dinheiro, Estrategia, MOEDAS,
+  ehBanca, valorAtual, buscarCarteiras, buscarOperacoes, buscarTeste, Carteira, data, dataHora, dinheiro, Estrategia, MOEDAS,
   NOME_ESTRATEGIA, NOME_TEMPO, numero, Operacao, pct, Teste,
 } from "./src/api";
 import Grafico from "./src/Grafico";
@@ -109,7 +109,10 @@ function Agora({ t, s, largo }: { t: Tema; s: Estilos; largo: boolean }) {
     return () => clearInterval(id);
   }, [carregar]);
 
-  const preco = carteiras?.[0]?.ultimo_preco;
+  const testnet = (carteiras ?? []).filter((c) => c.modo !== "simulado");
+  const totalInicial = testnet.reduce((a, c) => a + c.saldo_inicial, 0);
+  const totalAgora = testnet.reduce((a, c) => a + valorAtual(c), 0);
+  const totalPct = totalInicial ? (totalAgora / totalInicial - 1) * 100 : null;
   const atualizado = carteiras?.length ? carteiras.map((c) => c.atualizado_em).sort().pop()! : null;
 
   return (
@@ -121,8 +124,11 @@ function Agora({ t, s, largo }: { t: Tema; s: Estilos; largo: boolean }) {
           <>
             <View style={s.precoLinha}>
               <View>
-                <Text style={s.rotulo}>Bitcoin agora</Text>
-                <Text style={s.precoGrande}>{dinheiro(preco)}</Text>
+                <Text style={s.rotulo}>Saldo na Testnet</Text>
+                <Text style={s.precoGrande}>{dinheiro(totalAgora)}</Text>
+                <Text style={[s.textoNormal, { color: corDoNumero(t, totalPct == null ? null : Math.round(totalPct * 10) / 10) }]}>
+                  {pct(totalPct)} sobre {dinheiro(totalInicial)}
+                </Text>
               </View>
               <View style={{ alignItems: "flex-end" }}>
                 <Text style={s.rotulo}>Atualizado</Text>
@@ -134,10 +140,14 @@ function Agora({ t, s, largo }: { t: Tema; s: Estilos; largo: boolean }) {
                 )}
               </View>
             </View>
-            <View style={[s.grade, largo && { flexDirection: "row" }]}>
-              {carteiras.map((c) => (
-                <CarteiraCard key={c.id} c={c} t={t} s={s} ops={ops.filter((o) => o.carteira === c.id)} />
-              ))}
+            <View style={[s.grade, largo && { flexDirection: "row", flexWrap: "wrap" }]}>
+              {ordenar(carteiras).map((c) =>
+                ehBanca(c) ? (
+                  <BancaCard key={c.id} c={c} t={t} s={s} ops={ops.filter((o) => o.carteira === c.id)} />
+                ) : (
+                  <CarteiraCard key={c.id} c={c} t={t} s={s} ops={ops.filter((o) => o.carteira === c.id)} />
+                )
+              )}
             </View>
             <Text style={s.secao}>Últimas operações</Text>
             <View style={s.painel}>
@@ -150,7 +160,7 @@ function Agora({ t, s, largo }: { t: Tema; s: Estilos; largo: boolean }) {
               )}
             </View>
             <Text style={s.rodape}>
-              Simulação com dinheiro de mentira. Nenhuma ordem é enviada para corretora. Taxa de 0,1% por operação já descontada.
+              Testnet: ordens de verdade na Binance de teste, com dinheiro de mentira. Nada vai para a sua conta real.
             </Text>
           </>
         )}
@@ -173,8 +183,10 @@ function CarteiraCard({ c, t, s, ops }: { c: Carteira; t: Tema; s: Estilos; ops:
     <View style={[s.painel, s.cartao]}>
       <View style={s.linhaEntre}>
         <View style={{ flex: 1 }}>
-          <Text style={s.cartaoTitulo}>{NOME_ESTRATEGIA[c.estrategia]}</Text>
-          <Text style={s.textoSuave}>{c.par.replace("USDT", "")} · vela de {NOME_TEMPO[c.tempo] ?? c.tempo}</Text>
+          <Text style={s.cartaoTitulo}>{nomeMoeda(c.par)}</Text>
+          <Text style={s.textoSuave}>
+            {dinheiro(c.ultimo_preco)} · {NOME_ESTRATEGIA[c.estrategia]} · vela de {NOME_TEMPO[c.tempo] ?? c.tempo}
+          </Text>
           <Text style={[s.modo, { color: c.modo === "simulado" ? t.suave : t.acento }]}>
             {c.modo === "testnet" ? "Binance Testnet · ordens de verdade com dinheiro de teste" : c.modo === "real" ? "Binance · conta real" : "Só anotando (sem ordens)"}
           </Text>
@@ -230,6 +242,90 @@ function CarteiraCard({ c, t, s, ops }: { c: Carteira; t: Tema; s: Estilos; ops:
   );
 }
 
+function BancaCard({ c, t, s, ops }: { c: Carteira; t: Tema; s: Estilos; ops: Operacao[] }) {
+  const pares = c.par.split(",");
+  const ind = (c.indicadores ?? {}) as any;
+  const precos: Record<string, number> = ind.precos ?? {};
+  const rsis: Record<string, number | null> = ind.rsi ?? {};
+  const valor = valorAtual(c);
+  const lucro = (valor / c.saldo_inicial - 1) * 100;
+  const compradas = Object.keys(c.posicoes ?? {}).length;
+  const vendas = ops.filter((o) => o.tipo === "venda" && o.resultado_pct != null);
+  const acertos = vendas.filter((o) => (o.resultado_pct ?? 0) > 0).length;
+
+  return (
+    <View style={[s.painel, s.cartao]}>
+      <View style={s.linhaEntre}>
+        <View style={{ flex: 1 }}>
+          <Text style={s.cartaoTitulo}>Banca única</Text>
+          <Text style={s.textoSuave}>
+            {pares.map((p) => p.replace("USDT", "")).join(", ")} · RSI 14 · vela de {NOME_TEMPO[c.tempo] ?? c.tempo}
+          </Text>
+          <Text style={[s.modo, { color: c.modo === "simulado" ? t.suave : t.acento }]}>
+            {c.modo === "testnet" ? "Binance Testnet · ordens de verdade com dinheiro de teste" : "Só anotando (sem ordens)"}
+          </Text>
+        </View>
+        <View style={[s.pilula, { backgroundColor: compradas ? t.altaFraca : t.painel2 }]}>
+          <View style={[s.ponto, { backgroundColor: compradas ? t.alta : t.suave }]} />
+          <Text style={[s.pilulaTexto, { color: compradas ? t.alta : t.suave }]}>
+            {compradas ? `${compradas} de ${c.max_posicoes} compradas` : "Esperando sinal"}
+          </Text>
+        </View>
+      </View>
+
+      <View style={s.numeros}>
+        <Numero s={s} rotulo="Saldo" valor={dinheiro(valor)} />
+        <Numero s={s} rotulo="Resultado" valor={pct(lucro)} cor={corDoNumero(t, Math.round(lucro * 10) / 10)} />
+        <Numero s={s} rotulo="Operações" valor={`${vendas.length}${vendas.length ? ` · ${acertos} certas` : ""}`} />
+      </View>
+
+      {c.erro && (
+        <View style={[s.indicador, { backgroundColor: t.baixaFraca }]}>
+          <Text style={[s.textoNormal, { color: t.baixa }]}>{c.erro}</Text>
+        </View>
+      )}
+
+      <View style={{ gap: 10 }}>
+        {pares.map((p) => {
+          const pos = c.posicoes?.[p];
+          const preco = precos[p];
+          const var_ = pos && preco ? (preco / pos.preco - 1) * 100 : null;
+          const r = rsis[p];
+          return (
+            <View key={p} style={[s.indicador, { gap: 6 }]}>
+              <View style={s.linhaEntre}>
+                <Text style={[s.textoNormal, { fontWeight: "700" }]}>{nomeMoeda(p)}</Text>
+                <Text style={s.textoNormal}>{dinheiro(preco)}</Text>
+              </View>
+              <View style={s.linhaEntre}>
+                <Text style={s.textoSuave}>RSI {numero(r, 1)}</Text>
+                {pos ? (
+                  <Text style={[s.textoSuave, { color: corDoNumero(t, var_) }]}>
+                    Comprado a {dinheiro(pos.preco)} · {pct(var_)}
+                  </Text>
+                ) : (
+                  <Text style={s.textoSuave}>{r != null && r < 30 ? "Sinal de compra" : "Fora"}</Text>
+                )}
+              </View>
+              <View style={s.barra}>
+                <View style={[s.barraZona, { left: 0, width: "30%", backgroundColor: t.altaFraca }]} />
+                <View style={[s.barraZona, { left: "70%", width: "30%", backgroundColor: t.baixaFraca }]} />
+                {r != null && <View style={[s.barraMarca, { left: `${Math.max(0, Math.min(100, r))}%`, backgroundColor: t.acento }]} />}
+              </View>
+            </View>
+          );
+        })}
+      </View>
+      <Text style={s.regra}>
+        Quando uma moeda fica com RSI abaixo de 30, o robô compra com uma parte do dinheiro livre (até {c.max_posicoes} moedas ao mesmo tempo). Vende cada uma quando o RSI dela passa de 70.
+      </Text>
+      <Text style={s.textoSuave}>
+        Começou em {data(c.criado_em)} com {dinheiro(c.saldo_inicial)}. Para de comprar no dia se perder {dinheiro(c.limite_perda_dia)}.
+      </Text>
+    </View>
+  );
+}
+
 function BarraRsi({ t, s, valor }: { t: Tema; s: Estilos; valor: number | null }) {
   const v = valor ?? 50;
   const zona = valor == null ? "" : v < 30 ? "Abaixo de 30: sinal de compra" : v > 70 ? "Acima de 70: sinal de venda" : "Entre 30 e 70: sem sinal";
@@ -264,7 +360,7 @@ function LinhaOperacao({ o, t, s, ultima }: { o: Operacao; t: Tema; s: Estilos; 
       </View>
       <View style={{ flex: 1, minWidth: 0 }}>
         <Text style={s.textoNormal}>
-          {dinheiro(o.preco)} · {NOME_ESTRATEGIA[o.carteira.split("_")[0] as Estrategia]}
+          {nomeMoeda(o.par ?? o.carteira.split("_")[1] ?? "")} a {dinheiro(o.preco)}
         </Text>
         {o.motivo && <Text style={s.textoSuave} numberOfLines={2}>{o.motivo}</Text>}
       </View>
@@ -451,6 +547,15 @@ function Historico({ t, s, largo }: { t: Tema; s: Estilos; largo: boolean }) {
 }
 
 // ---------------- Peças ----------------
+function nomeMoeda(par: string) {
+  return MOEDAS.find((m) => m.par === par)?.nome ?? par.replace("USDT", "");
+}
+
+// Testnet primeiro (banca na frente); depois as simuladas
+function ordenar(l: Carteira[]) {
+  const peso = (c: Carteira) => (c.modo === "simulado" ? 2 : ehBanca(c) ? 0 : 1);
+  return [...l].sort((a, b) => peso(a) - peso(b));
+}
 function abreviar(n: number) {
   const a = Math.abs(n);
   if (a >= 1e6) return `${numero(n / 1e6, 1)}M`;
@@ -531,7 +636,7 @@ function estilos(t: Tema) {
     rotulo: { color: t.suave, fontSize: 11.5, fontWeight: "700", letterSpacing: 0.6, textTransform: "uppercase", marginBottom: 4, marginTop: 4 },
     grade: { gap: 12, marginTop: 4 },
     painel: { backgroundColor: t.painel, borderRadius: 14, borderWidth: 1, borderColor: t.borda, padding: 14 },
-    cartao: { flex: 1, gap: 12 },
+    cartao: { flexGrow: 1, flexBasis: 340, gap: 12 },
     cartaoTitulo: { color: t.texto, fontSize: 17, fontWeight: "700" },
     modo: { fontSize: 12, fontWeight: "700", marginTop: 3 },
     linhaEntre: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", gap: 8 },

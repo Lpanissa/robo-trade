@@ -139,6 +139,25 @@ export function backtest(candles: Candle[], estrategia: Estrategia, saldo = 1000
   for (let i = 0; i < candles.length; i += passo) {
     serie.push({ t: candles[i].t, preco: fech[i], patrimonio: round(patrimonio[i]), segurar: round(saldo * (1 - TAXA) * (fech[i] / p0)) });
   }
+  // Resultado mês a mês (horário de Brasília): robô x só segurar
+  const mensal: { mes: string; robo_pct: number; segurar_pct: number; operacoes: number }[] = [];
+  const mesDe = (t: number) => new Date(t - 3 * 3600_000).toISOString().slice(0, 7);
+  let iIni = 0;
+  for (let i = 1; i <= candles.length; i++) {
+    if (i === candles.length || mesDe(candles[i].t) !== mesDe(candles[iIni].t)) {
+      const base = iIni === 0 ? saldo : patrimonio[iIni - 1];
+      const precoBase = iIni === 0 ? fech[0] : fech[iIni - 1];
+      const ini = candles[iIni].t, fim = candles[i - 1].t;
+      mensal.push({
+        mes: mesDe(ini),
+        robo_pct: round((patrimonio[i - 1] / base - 1) * 100),
+        segurar_pct: round((fech[i - 1] / precoBase - 1) * 100),
+        operacoes: ops.filter((o) => o.venda_em >= ini && o.venda_em <= fim).length,
+      });
+      iIni = i;
+    }
+  }
+
   const ult = candles.length - 1;
   if (ult >= 0 && serie[serie.length - 1]?.t !== candles[ult].t) {
     serie.push({ t: candles[ult].t, preco: pN, patrimonio: round(final), segurar: round(segurarFinal) });
@@ -162,6 +181,7 @@ export function backtest(candles: Candle[], estrategia: Estrategia, saldo = 1000
     lista: ops.slice(-40).reverse().map((o) => ({ ...o, resultado_pct: round(o.resultado_pct) })),
     marcas: marcas.slice(-120),
     serie,
+    mensal,
   };
 }
 

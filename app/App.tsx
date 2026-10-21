@@ -475,14 +475,12 @@ function Aviso({ t, s, texto }: { t: Tema; s: Estilos; texto: string }) {
 }
 
 function Logo({ t }: { t: Tema }) {
-  // Duas velas quase coladas formando um "P": a verde é a haste, a vermelha é a barriga
+  // Duas velas retas quase coladas formando um "P": a verde é a haste, a vermelha é a barriga
   return (
     <Svg width={40} height={40} viewBox="0 0 40 40">
       <Rect x={0} y={0} width={40} height={40} rx={11} fill={t.painel2} />
-      <Rect x={13.4} y={5} width={1.4} height={31} rx={0.7} fill={t.alta} />
-      <Rect x={10.5} y={8} width={7.2} height={25} rx={1.6} fill={t.alta} />
-      <Rect x={22.6} y={5} width={1.4} height={20} rx={0.7} fill={t.baixa} />
-      <Path d="M18.9 8 H24.5 A5.6 5.6 0 0 1 30.1 13.6 V16.4 A5.6 5.6 0 0 1 24.5 22 H18.9 Z" fill={t.baixa} />
+      <Rect x={9.9} y={2.8} width={9.5} height={34.3} rx={1.5} fill={t.alta} />
+      <Rect x={21} y={2.8} width={9.5} height={17.8} rx={1.5} fill={t.baixa} />
     </Svg>
   );
 }

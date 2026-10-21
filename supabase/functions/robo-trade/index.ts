@@ -36,13 +36,25 @@ async function db(caminho: string, init: RequestInit = {}) {
 }
 
 // Busca candles; devolve fechados + preço atual
-async function candles(par: string, tempo: string) {
+async function candles(par: string, tempo: string, quantidade = 1000) {
   let ultimoErro = "";
   for (const base of FONTES) {
     try {
-      const r = await fetch(`${base}/api/v3/klines?symbol=${par}&interval=${tempo}&limit=1000`);
-      if (!r.ok) { ultimoErro = `${base}: ${r.status}`; continue; }
-      const linhas = (await r.json()) as unknown[][];
+      // A Binance entrega no máximo 1000 velas por vez: busca em partes, do mais novo para o mais antigo
+      let linhas: unknown[][] = [];
+      let fim: number | null = null;
+      let falhou = false;
+      while (linhas.length < quantidade) {
+        const lim = Math.min(1000, quantidade - linhas.length);
+        const r = await fetch(`${base}/api/v3/klines?symbol=${par}&interval=${tempo}&limit=${lim}${fim ? `&endTime=${fim}` : ""}`);
+        if (!r.ok) { ultimoErro = `${base}: ${r.status}`; falhou = true; break; }
+        const parte = (await r.json()) as unknown[][];
+        if (!parte.length) break;
+        linhas = [...parte, ...linhas];
+        fim = Number(parte[0][0]) - 1;
+        if (parte.length < lim) break;
+      }
+      if (falhou) continue;
       const agora = Date.now();
       const fechados: Candle[] = [];
       for (const k of linhas) {
@@ -57,8 +69,11 @@ async function candles(par: string, tempo: string) {
   throw new Error(`Não consegui ler os preços da Binance (${ultimoErro})`);
 }
 
-async function testarHistorico(par: string, tempo: string, salvar = true) {
-  const { fechados } = await candles(par, tempo);
+const HORAS: Record<string, number> = { "15m": 0.25, "1h": 1, "4h": 4, "1d": 24 };
+
+async function testarHistorico(par: string, tempo: string, salvar = true, dias = 0) {
+  const qtd = dias > 0 ? Math.min(6000, Math.ceil((dias * 24) / HORAS[tempo]) + 50) : 1000;
+  const { fechados } = await candles(par, tempo, qtd);
   const resultado: Record<string, unknown> = {};
   for (const e of Object.keys(ESTRATEGIAS) as Estrategia[]) {
     const r = { par, tempo, ...backtest(fechados, e) };
@@ -194,7 +209,9 @@ Deno.serve(async (req) => {
       const par = (u.searchParams.get("par") ?? "BTCUSDT").toUpperCase();
       const tempo = u.searchParams.get("tempo") ?? "1h";
       if (!/^[A-Z0-9]{2,12}USDT$/.test(par) || !TEMPOS.includes(tempo)) return json({ ok: false, erro: "Moeda ou tempo inválido" }, 400);
-      return json({ ok: true, resultado: await testarHistorico(par, tempo) });
+      const dias = Math.max(0, Math.min(250, Number(u.searchParams.get("dias") ?? 0) || 0));
+      // Testes de período longo não substituem o teste guardado do app
+      return json({ ok: true, resultado: await testarHistorico(par, tempo, dias === 0, dias) });
     }
     if (acao === "testar_conta") return json({ ok: true, conta: await testarConta("testnet") });
     return json({ ok: false, erro: "Ação desconhecida" }, 400);

@@ -1,7 +1,7 @@
 // Robô Trade — roda na nuvem (Supabase) a cada 5 minutos.
 // Lê o histórico de preços da Binance (dados públicos) e decide compra/venda.
 // Carteiras "simulado" só anotam; carteiras "testnet" mandam ordens na Binance Testnet.
-import { backtest, calcularSinais, Candle, Estrategia, ESTRATEGIAS, motivo, TAXA } from "./logica.ts";
+import { backtest, backtestBanca, calcularSinais, Candle, Estrategia, ESTRATEGIAS, motivo, TAXA } from "./logica.ts";
 import { comprar, temChaves, testarConta, vender } from "./binance.ts";
 
 const URL_SB = Deno.env.get("SUPABASE_URL")!;
@@ -212,6 +212,16 @@ Deno.serve(async (req) => {
       const dias = Math.max(0, Math.min(250, Number(u.searchParams.get("dias") ?? 0) || 0));
       // Testes de período longo não substituem o teste guardado do app
       return json({ ok: true, resultado: await testarHistorico(par, tempo, dias === 0, dias) });
+    }
+    if (acao === "backtest_banca") {
+      const pares = (u.searchParams.get("pares") ?? "BTCUSDT,ETHUSDT,SOLUSDT,BNBUSDT").toUpperCase().split(",").filter((p) => /^[A-Z0-9]{2,12}USDT$/.test(p)).slice(0, 6);
+      const tempo = u.searchParams.get("tempo") ?? "1h";
+      const dias = Math.max(1, Math.min(250, Number(u.searchParams.get("dias") ?? 184) || 184));
+      if (!pares.length || !TEMPOS.includes(tempo)) return json({ ok: false, erro: "Moedas ou tempo inválido" }, 400);
+      const qtd = Math.min(6000, Math.ceil((dias * 24) / HORAS[tempo]) + 50);
+      const mapa: Record<string, Candle[]> = {};
+      for (const p of pares) mapa[p] = (await candles(p, tempo, qtd)).fechados;
+      return json({ ok: true, resultado: backtestBanca(mapa, "rsi") });
     }
     if (acao === "testar_conta") return json({ ok: true, conta: await testarConta("testnet") });
     return json({ ok: false, erro: "Ação desconhecida" }, 400);

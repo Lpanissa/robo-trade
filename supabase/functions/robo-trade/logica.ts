@@ -188,3 +188,83 @@ export function backtest(candles: Candle[], estrategia: Estrategia, saldo = 1000
 function round(n: number) {
   return Math.round(n * 100) / 100;
 }
+
+// ---------- Banca única para várias moedas ----------
+// Uma banca só: quando está fora, entra na moeda que der sinal de compra
+// (se mais de uma der sinal na mesma vela, escolhe a de RSI mais baixo).
+// Fica nela até o sinal de venda dessa moeda; depois volta a procurar.
+export function escolherEntrada(sinaisCompra: { par: string; rsi: number | null }[]) {
+  if (!sinaisCompra.length) return null;
+  return [...sinaisCompra].sort((a, b) => (a.rsi ?? 50) - (b.rsi ?? 50))[0].par;
+}
+
+export function backtestBanca(mapa: Record<string, Candle[]>, estrategia: Estrategia, saldo = 1000) {
+  const pares = Object.keys(mapa);
+  // Só usa os horários que existem em todas as moedas
+  const tempos = pares.map((p) => new Set(mapa[p].map((k) => k.t)));
+  const comuns = mapa[pares[0]].map((k) => k.t).filter((t) => tempos.every((s) => s.has(t)));
+  const info: Record<string, { idx: Map<number, number>; fech: number[]; sinais: Sinal[]; rsi: (number | null)[] }> = {};
+  for (const p of pares) {
+    const fech = mapa[p].map((k) => k.c);
+    info[p] = { idx: new Map(mapa[p].map((k, i) => [k.t, i])), fech, sinais: calcularSinais(fech, estrategia).sinais, rsi: rsi(fech, 14) };
+  }
+  let caixa = saldo, qtd = 0, atual: string | null = null, compraCaixa = 0, compraPreco = 0, compraT = 0;
+  const ops: { par: string; compra_em: number; compra_preco: number; venda_em: number; venda_preco: number; resultado_pct: number }[] = [];
+  const patrimonio: number[] = [];
+  let pico = saldo, maiorQueda = 0;
+  for (const t of comuns) {
+    if (atual) {
+      const d = info[atual], i = d.idx.get(t)!;
+      if (d.sinais[i] === "venda") {
+        caixa = qtd * d.fech[i] * (1 - TAXA);
+        ops.push({ par: atual, compra_em: compraT, compra_preco: compraPreco, venda_em: t, venda_preco: d.fech[i], resultado_pct: (caixa / compraCaixa - 1) * 100 });
+        qtd = 0; atual = null;
+      }
+    } else {
+      const cands = pares.filter((p) => info[p].sinais[info[p].idx.get(t)!] === "compra").map((p) => ({ par: p, rsi: info[p].rsi[info[p].idx.get(t)!] }));
+      const p = escolherEntrada(cands);
+      if (p) {
+        const i = info[p].idx.get(t)!;
+        atual = p; compraCaixa = caixa; compraPreco = info[p].fech[i]; compraT = t;
+        qtd = (caixa * (1 - TAXA)) / compraPreco; caixa = 0;
+      }
+    }
+    const pat = atual ? qtd * info[atual].fech[info[atual].idx.get(t)!] : caixa;
+    patrimonio.push(pat);
+    if (pat > pico) pico = pat;
+    maiorQueda = Math.max(maiorQueda, (1 - pat / pico) * 100);
+  }
+  const mesDe = (t: number) => new Date(t - 3 * 3600_000).toISOString().slice(0, 7);
+  const mensal: { mes: string; robo_pct: number; operacoes: number }[] = [];
+  let iIni = 0;
+  for (let i = 1; i <= comuns.length; i++) {
+    if (i === comuns.length || mesDe(comuns[i]) !== mesDe(comuns[iIni])) {
+      const base = iIni === 0 ? saldo : patrimonio[iIni - 1];
+      const ini = comuns[iIni], fim = comuns[i - 1];
+      mensal.push({ mes: mesDe(ini), robo_pct: round((patrimonio[i - 1] / base - 1) * 100), operacoes: ops.filter((o) => o.venda_em >= ini && o.venda_em <= fim).length });
+      iIni = i;
+    }
+  }
+  const final = patrimonio[patrimonio.length - 1] ?? saldo;
+  const porMoeda: Record<string, { operacoes: number; acertos: number }> = {};
+  for (const o of ops) {
+    porMoeda[o.par] ??= { operacoes: 0, acertos: 0 };
+    porMoeda[o.par].operacoes++;
+    if (o.resultado_pct > 0) porMoeda[o.par].acertos++;
+  }
+  return {
+    pares,
+    inicio: comuns[0] ?? null,
+    fim: comuns[comuns.length - 1] ?? null,
+    saldo_inicial: saldo,
+    saldo_final: round(final),
+    resultado_pct: round((final / saldo - 1) * 100),
+    operacoes: ops.length,
+    acertos_pct: ops.length ? round((ops.filter((o) => o.resultado_pct > 0).length / ops.length) * 100) : 0,
+    maior_queda_pct: round(maiorQueda),
+    posicao_aberta: atual,
+    por_moeda: porMoeda,
+    mensal,
+    lista: ops.slice(-40).reverse().map((o) => ({ ...o, resultado_pct: round(o.resultado_pct) })),
+  };
+}

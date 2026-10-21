@@ -1,0 +1,84 @@
+name: Gerar apps
+
+on:
+  push:
+    branches: [main]
+    paths: ["app/**", ".github/workflows/**"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: gerar-apps
+  cancel-in-progress: true
+
+jobs:
+  android:
+    name: App do celular (APK)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - name: Instalar dependências
+        run: |
+          npm install
+          npx expo install --fix || true
+      - name: Gerar projeto Android
+        run: npx expo prebuild --platform android --no-install
+      - name: Compilar APK
+        working-directory: app/android
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleRelease --no-daemon
+      - name: Renomear APK
+        run: cp android/app/build/outputs/apk/release/app-release.apk robo-trade.apk
+      - name: Publicar APK
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v1.0.${{ github.run_number }}
+          name: Robô Trade v1.0.${{ github.run_number }}
+          body: APK do Robô Trade para Android. Baixe o arquivo robo-trade.apk no celular e instale.
+          files: app/robo-trade.apk
+          make_latest: true
+
+  web:
+    name: Versão do PC (site)
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Instalar dependências
+        run: |
+          npm install
+          npx expo install --fix || true
+      - name: Gerar site
+        run: |
+          npx expo export --platform web
+          cp dist/index.html dist/404.html
+          touch dist/.nojekyll
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: app/dist
+      - id: deploy
+        uses: actions/deploy-pages@v4

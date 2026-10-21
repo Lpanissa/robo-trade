@@ -1,0 +1,150 @@
+// Lógica do Robô Trade: indicadores, sinais e teste no histórico.
+// Tudo aqui é simulação: nenhuma ordem é enviada para corretora.
+
+export const TAXA = 0.001; // 0,1% por operação (taxa padrão da Binance)
+
+export type Candle = { t: number; c: number };
+export type Sinal = "compra" | "venda" | null;
+export type Estrategia = "medias" | "rsi";
+
+export const ESTRATEGIAS: Record<Estrategia, { nome: string; regra: string }> = {
+  medias: {
+    nome: "Cruzamento de médias 9/21",
+    regra: "Compra quando a média de 9 passa para cima da média de 21; vende quando cruza para baixo.",
+  },
+  rsi: {
+    nome: "RSI 14",
+    regra: "Compra quando o RSI fica abaixo de 30 (caiu demais); vende quando passa de 70 (subiu demais).",
+  },
+};
+
+export function mediaMovel(v: number[], n: number): (number | null)[] {
+  const out: (number | null)[] = new Array(v.length).fill(null);
+  let soma = 0;
+  for (let i = 0; i < v.length; i++) {
+    soma += v[i];
+    if (i >= n) soma -= v[i - n];
+    if (i >= n - 1) out[i] = soma / n;
+  }
+  return out;
+}
+
+export function rsi(v: number[], n = 14): (number | null)[] {
+  const out: (number | null)[] = new Array(v.length).fill(null);
+  if (v.length <= n) return out;
+  let ganho = 0, perda = 0;
+  for (let i = 1; i <= n; i++) {
+    const d = v[i] - v[i - 1];
+    if (d > 0) ganho += d; else perda -= d;
+  }
+  ganho /= n; perda /= n;
+  const calc = () => (perda === 0 ? 100 : 100 - 100 / (1 + ganho / perda));
+  out[n] = calc();
+  for (let i = n + 1; i < v.length; i++) {
+    const d = v[i] - v[i - 1];
+    ganho = (ganho * (n - 1) + (d > 0 ? d : 0)) / n;
+    perda = (perda * (n - 1) + (d < 0 ? -d : 0)) / n;
+    out[i] = calc();
+  }
+  return out;
+}
+
+export function calcularSinais(fech: number[], estrategia: Estrategia) {
+  const sinais: Sinal[] = new Array(fech.length).fill(null);
+  if (estrategia === "medias") {
+    const r = mediaMovel(fech, 9), l = mediaMovel(fech, 21);
+    for (let i = 1; i < fech.length; i++) {
+      const a = r[i - 1], b = l[i - 1], c = r[i], d = l[i];
+      if (a == null || b == null || c == null || d == null) continue;
+      if (a <= b && c > d) sinais[i] = "compra";
+      else if (a >= b && c < d) sinais[i] = "venda";
+    }
+    const ind = (i: number) => ({ media_rapida: r[i], media_lenta: l[i] });
+    return { sinais, ind };
+  }
+  const x = rsi(fech, 14);
+  for (let i = 0; i < fech.length; i++) {
+    const v = x[i];
+    if (v == null) continue;
+    if (v < 30) sinais[i] = "compra";
+    else if (v > 70) sinais[i] = "venda";
+  }
+  const ind = (i: number) => ({ rsi: x[i] });
+  return { sinais, ind };
+}
+
+export function motivo(estrategia: Estrategia, tipo: "compra" | "venda", ind: Record<string, number | null>) {
+  const f = (n: number | null | undefined, d = 0) => (n == null ? "-" : n.toLocaleString("pt-BR", { maximumFractionDigits: d }));
+  if (estrategia === "medias") {
+    return tipo === "compra"
+      ? `Média 9 (${f(ind.media_rapida)}) cruzou para cima da média 21 (${f(ind.media_lenta)})`
+      : `Média 9 (${f(ind.media_rapida)}) cruzou para baixo da média 21 (${f(ind.media_lenta)})`;
+  }
+  return tipo === "compra" ? `RSI em ${f(ind.rsi, 1)}, abaixo de 30` : `RSI em ${f(ind.rsi, 1)}, acima de 70`;
+}
+
+export function backtest(candles: Candle[], estrategia: Estrategia, saldo = 1000) {
+  const fech = candles.map((k) => k.c);
+  const { sinais } = calcularSinais(fech, estrategia);
+  let caixa = saldo, qtd = 0, compraCaixa = 0, compraPreco = 0, compraT = 0;
+  const ops: { compra_em: number; compra_preco: number; venda_em: number; venda_preco: number; resultado_pct: number }[] = [];
+  const marcas: { t: number; tipo: "compra" | "venda"; preco: number }[] = [];
+  const patrimonio: number[] = [];
+  let pico = saldo, maiorQueda = 0;
+  for (let i = 0; i < candles.length; i++) {
+    const p = fech[i], s = sinais[i];
+    if (s === "compra" && qtd === 0) {
+      compraCaixa = caixa; compraPreco = p; compraT = candles[i].t;
+      qtd = (caixa * (1 - TAXA)) / p; caixa = 0;
+      marcas.push({ t: candles[i].t, tipo: "compra", preco: p });
+    } else if (s === "venda" && qtd > 0) {
+      caixa = qtd * p * (1 - TAXA); qtd = 0;
+      ops.push({ compra_em: compraT, compra_preco: compraPreco, venda_em: candles[i].t, venda_preco: p, resultado_pct: (caixa / compraCaixa - 1) * 100 });
+      marcas.push({ t: candles[i].t, tipo: "venda", preco: p });
+    }
+    const pat = caixa + qtd * p;
+    patrimonio.push(pat);
+    if (pat > pico) pico = pat;
+    const queda = (1 - pat / pico) * 100;
+    if (queda > maiorQueda) maiorQueda = queda;
+  }
+  const final = patrimonio[patrimonio.length - 1] ?? saldo;
+  const p0 = fech[0], pN = fech[fech.length - 1];
+  const segurarFinal = saldo * (1 - TAXA) * (pN / p0);
+  const acertos = ops.filter((o) => o.resultado_pct > 0).length;
+
+  // Série reduzida para o gráfico (até 240 pontos)
+  const passo = Math.max(1, Math.ceil(candles.length / 240));
+  const serie: { t: number; preco: number; patrimonio: number; segurar: number }[] = [];
+  for (let i = 0; i < candles.length; i += passo) {
+    serie.push({ t: candles[i].t, preco: fech[i], patrimonio: round(patrimonio[i]), segurar: round(saldo * (1 - TAXA) * (fech[i] / p0)) });
+  }
+  const ult = candles.length - 1;
+  if (ult >= 0 && serie[serie.length - 1]?.t !== candles[ult].t) {
+    serie.push({ t: candles[ult].t, preco: pN, patrimonio: round(final), segurar: round(segurarFinal) });
+  }
+
+  return {
+    estrategia,
+    nome: ESTRATEGIAS[estrategia].nome,
+    regra: ESTRATEGIAS[estrategia].regra,
+    inicio: candles[0]?.t ?? null,
+    fim: candles[ult]?.t ?? null,
+    candles: candles.length,
+    saldo_inicial: saldo,
+    saldo_final: round(final),
+    resultado_pct: round((final / saldo - 1) * 100),
+    segurar_pct: round((segurarFinal / saldo - 1) * 100),
+    operacoes: ops.length,
+    acertos_pct: ops.length ? round((acertos / ops.length) * 100) : 0,
+    maior_queda_pct: round(maiorQueda),
+    posicao_aberta: qtd > 0,
+    lista: ops.slice(-40).reverse().map((o) => ({ ...o, resultado_pct: round(o.resultado_pct) })),
+    marcas: marcas.slice(-120),
+    serie,
+  };
+}
+
+function round(n: number) {
+  return Math.round(n * 100) / 100;
+}

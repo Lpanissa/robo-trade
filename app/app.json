@@ -1,0 +1,36 @@
+{
+  "expo": {
+    "name": "Robô Trade",
+    "slug": "robo-trade",
+    "version": "1.0.0",
+    "orientation": "default",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "automatic",
+    "backgroundColor": "#10141C",
+    "splash": {
+      "image": "./assets/icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#10141C"
+    },
+    "android": {
+      "package": "com.panissa.robotrade",
+      "versionCode": 1,
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#10141C"
+      },
+      "edgeToEdgeEnabled": true
+    },
+    "web": {
+      "output": "single",
+      "favicon": "./assets/favicon.png",
+      "name": "Robô Trade",
+      "shortName": "Robô Trade",
+      "themeColor": "#10141C",
+      "backgroundColor": "#10141C"
+    },
+    "experiments": {
+      "baseUrl": "/robo-trade"
+    }
+  }
+}

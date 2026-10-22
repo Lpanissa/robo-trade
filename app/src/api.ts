@@ -98,6 +98,30 @@ export async function buscarCarteiras(): Promise<Carteira[]> {
   }));
 }
 
+// Conta REAL da Binance (só leitura, atualizada pelo robô a cada 5 minutos)
+export type ContaReal = {
+  moedas: { moeda: string; qtd: number; usdt: number }[];
+  total_usdt: number | null;
+  total_brl: number | null;
+  usdt_brl: number | null;
+  erro: string | null;
+  atualizado_em: string;
+};
+
+export async function buscarContaReal(): Promise<ContaReal | null> {
+  try {
+    const l = await ler<any[]>("robo_conta_real?select=*&id=eq.1");
+    if (!l.length) return null;
+    const c = l[0];
+    return { ...c, total_usdt: num(c.total_usdt), total_brl: num(c.total_brl), usdt_brl: num(c.usdt_brl), moedas: c.moedas ?? [] };
+  } catch {
+    return null; // tabela ainda não criada ou sem chave de leitura
+  }
+}
+
+const brl = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
+export const reais = (n: number | null | undefined) => (n == null || isNaN(n) ? "-" : brl.format(n));
+
 export async function buscarOperacoes(): Promise<Operacao[]> {
   const l = await ler<any[]>("robo_operacoes?select=*&order=em.desc&limit=40");
   return l.map((o) => ({ ...o, preco: Number(o.preco), qtd: Number(o.qtd), valor: Number(o.valor), resultado_pct: num(o.resultado_pct) }));

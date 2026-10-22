@@ -5,7 +5,7 @@ import { StatusBar } from "expo-status-bar";
 import Svg, { Path, Rect } from "react-native-svg";
 import {
   ehBanca, valorAtual, buscarCarteiras, buscarOperacoes, buscarTeste, Carteira, data, dataHora, dinheiro, Estrategia, MOEDAS,
-  NOME_ESTRATEGIA, NOME_TEMPO, numero, Operacao, pct, Teste,
+  NOME_ESTRATEGIA, NOME_TEMPO, numero, Operacao, pct, Teste, buscarContaReal, ContaReal, reais,
 } from "./src/api";
 import Grafico from "./src/Grafico";
 import { Atualizacao, baixarAtualizacao, ouvirToqueNaNotificacao, procurarAtualizacao } from "./src/atualizacao";
@@ -88,14 +88,15 @@ function Tela() {
 function Agora({ t, s, largo }: { t: Tema; s: Estilos; largo: boolean }) {
   const [carteiras, setCarteiras] = useState<Carteira[] | null>(null);
   const [ops, setOps] = useState<Operacao[]>([]);
+  const [real, setReal] = useState<ContaReal | null>(null);
   const [erro, setErro] = useState<string | null>(null);
   const [atualizando, setAtualizando] = useState(false);
 
   const carregar = useCallback(async () => {
     setAtualizando(true);
     try {
-      const [c, o] = await Promise.all([buscarCarteiras(), buscarOperacoes()]);
-      setCarteiras(c); setOps(o); setErro(null);
+      const [c, o, r] = await Promise.all([buscarCarteiras(), buscarOperacoes(), buscarContaReal()]);
+      setCarteiras(c); setOps(o); setReal(r); setErro(null);
     } catch (e) {
       setErro((e as Error).message);
     } finally {
@@ -120,6 +121,7 @@ function Agora({ t, s, largo }: { t: Tema; s: Estilos; largo: boolean }) {
       <View style={s.conteudo}>
         {erro && <Aviso t={t} s={s} texto={erro} />}
         {!carteiras && !erro && <ActivityIndicator color={t.acento} style={{ marginTop: 40 }} />}
+        {real && <ContaRealCard r={real} t={t} s={s} />}
         {carteiras && (
           <>
             <View style={s.precoLinha}>
@@ -166,6 +168,42 @@ function Agora({ t, s, largo }: { t: Tema; s: Estilos; largo: boolean }) {
         )}
       </View>
     </ScrollView>
+  );
+}
+
+// Conta real da Binance: só mostra (o app e o robô não mexem nela)
+function ContaRealCard({ r, t, s }: { r: ContaReal; t: Tema; s: Estilos }) {
+  return (
+    <View style={[s.painel, s.cartao, { marginBottom: 16 }]}>
+      <View style={s.linhaEntre}>
+        <View style={{ flex: 1 }}>
+          <Text style={s.rotulo}>Minha conta real · Binance</Text>
+          <Text style={s.precoGrande}>{reais(r.total_brl)}</Text>
+          <Text style={s.textoSuave}>{dinheiro(r.total_usdt)}</Text>
+        </View>
+        <View style={{ alignItems: "flex-end" }}>
+          <Text style={s.rotulo}>Atualizado</Text>
+          <Text style={s.textoSuave}>{dataHora(r.atualizado_em)}</Text>
+        </View>
+      </View>
+      {r.erro ? (
+        <View style={[s.indicador, { backgroundColor: t.baixaFraca }]}>
+          <Text style={[s.textoNormal, { color: t.baixa }]}>{r.erro}</Text>
+        </View>
+      ) : (
+        r.moedas.map((m) => (
+          <View key={m.moeda} style={s.linhaEntre}>
+            <Text style={s.textoNormal}>
+              {nomeMoeda(m.moeda + "USDT")} <Text style={s.textoSuave}>{m.qtd.toLocaleString("pt-BR", { maximumFractionDigits: 8 })}</Text>
+            </Text>
+            <Text style={s.textoNormal}>
+              {reais(r.usdt_brl ? m.usdt * r.usdt_brl : null)} <Text style={s.textoSuave}>· {dinheiro(m.usdt)}</Text>
+            </Text>
+          </View>
+        ))
+      )}
+      <Text style={s.textoSuave}>Só leitura: o app mostra o saldo, mas não compra nem vende na conta real.</Text>
+    </View>
   );
 }
 

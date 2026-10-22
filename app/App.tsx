@@ -245,11 +245,16 @@ function SinaisCard({ c, t, s }: { c: Carteira; t: Tema; s: Estilos }) {
                 <View style={[s.barraZona, { left: "70%", width: "30%", backgroundColor: t.baixaFraca }]} />
                 {v != null && <View style={[s.barraMarca, { left: `${Math.max(0, Math.min(100, v))}%`, backgroundColor: t.acento }]} />}
               </View>
+              <View style={{ flexDirection: "row" }}>
+                <Text style={[s.miudo, { width: "30%", color: t.alta }]}>Zona de compra</Text>
+                <Text style={[s.miudo, { width: "40%", textAlign: "center" }]}>Meio</Text>
+                <Text style={[s.miudo, { width: "30%", textAlign: "right", color: t.baixa }]}>Caro demais</Text>
+              </View>
             </View>
           );
         })}
       </View>
-      <Text style={s.regra}>Abaixo de 30 os bots compram. Vendem com 2,9% de lucro.</Text>
+      <Text style={s.regra}>O tracinho laranja é o RSI da moeda agora. Quando ele entra na parte verde (abaixo de 30), a moeda caiu bastante e o bot dela compra. Depois vende quando der 2,9% de lucro.</Text>
     </View>
   );
 }
@@ -482,7 +487,7 @@ function estilos(t: Tema) {
     rotulo: { color: t.suave, fontSize: 11.5, fontWeight: "700", letterSpacing: 0.6, textTransform: "uppercase", marginBottom: 4, marginTop: 4 },
     grade: { gap: 12, marginTop: 4 },
     painel: { backgroundColor: t.painel, borderRadius: 14, borderWidth: 1, borderColor: t.borda, padding: 14 },
-    cartao: { flexGrow: 1, flexBasis: 340, gap: 12 },
+    cartao: { gap: 12 },
     cartaoTitulo: { color: t.texto, fontSize: 17, fontWeight: "700" },
     modo: { fontSize: 12, fontWeight: "700", marginTop: 3 },
     linhaEntre: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", gap: 8 },

@@ -71,26 +71,32 @@ export async function lerContaReal() {
 
   // Reais viram dólar pela cotação de agora (aproximado)
   const usd = (valor: number, cot: string) => (cot === "USDT" ? valor : usdtBrl ? valor / usdtBrl : 0);
-  const pos: Record<string, { qtd: number; custo: number }> = {};
+  // Lotes de compra de cada moeda; a venda sai das compras mais recentes primeiro
+  // (assim o lucro de cada venda é comparado com a compra que o bot acabou de fazer)
+  const lotes: Record<string, { qtd: number; custoUn: number }[]> = {};
   const operacoes: OperacaoReal[] = [];
   for (const n of negocios) {
-    const p = (pos[n.moeda] ??= { qtd: 0, custo: 0 });
+    const pilha = (lotes[n.moeda] ??= []);
     const valor = usd(n.quote, n.cot);
     const taxaUsd = n.taxaMoeda === n.cot ? usd(n.taxa, n.cot) : n.taxaMoeda === n.moeda ? n.taxa * (valor / (n.qtd || 1)) : emUsdt(n.taxaMoeda, n.taxa);
     if (n.compra) {
       const recebido = n.taxaMoeda === n.moeda ? n.qtd - n.taxa : n.qtd;
-      p.qtd += recebido;
-      p.custo += valor + (n.taxaMoeda !== n.moeda ? taxaUsd : 0);
+      const custo = valor + (n.taxaMoeda !== n.moeda ? taxaUsd : 0);
+      if (recebido > 0) pilha.push({ qtd: recebido, custoUn: custo / recebido });
       operacoes.push({ em: n.em, moeda: n.moeda, par: n.par, tipo: "compra", qtd: recebido, preco_usdt: usd(n.preco, n.cot), valor_usdt: valor, lucro_usdt: null, lucro_pct: null });
     } else {
-      const medio = p.qtd > 0 ? p.custo / p.qtd : 0;
-      const q = Math.min(n.qtd, p.qtd);
-      const custoVendido = medio * q;
+      let falta = n.qtd, custoVendido = 0, achou = 0;
+      while (falta > 1e-12 && pilha.length) {
+        const l = pilha[pilha.length - 1];
+        const usar = Math.min(l.qtd, falta);
+        custoVendido += usar * l.custoUn; achou += usar;
+        l.qtd -= usar; falta -= usar;
+        if (l.qtd <= 1e-12) pilha.pop();
+      }
       const recebido = valor - taxaUsd;
-      const lucro = medio > 0 ? recebido - custoVendido : null;
-      p.qtd = Math.max(0, p.qtd - n.qtd);
-      p.custo = Math.max(0, p.custo - custoVendido);
-      operacoes.push({ em: n.em, moeda: n.moeda, par: n.par, tipo: "venda", qtd: n.qtd, preco_usdt: usd(n.preco, n.cot), valor_usdt: valor, lucro_usdt: lucro, lucro_pct: lucro != null && custoVendido > 0 ? (lucro / custoVendido) * 100 : null });
+      // Só calcula lucro se achou a compra de quase tudo que foi vendido
+      const lucro = achou >= n.qtd * 0.98 && custoVendido > 0 ? recebido * (achou / n.qtd) - custoVendido : null;
+      operacoes.push({ em: n.em, moeda: n.moeda, par: n.par, tipo: "venda", qtd: n.qtd, preco_usdt: usd(n.preco, n.cot), valor_usdt: valor, lucro_usdt: lucro, lucro_pct: lucro != null ? (lucro / custoVendido) * 100 : null });
     }
   }
   // Preço médio do que você TEM agora: as compras mais recentes que somam o saldo atual

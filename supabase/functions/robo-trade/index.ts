@@ -85,6 +85,34 @@ async function testarHistorico(par: string, tempo: string, salvar = true, dias =
   return resultado;
 }
 
+// ---------- Avisos no celular (app ntfy) ----------
+const NOMES: Record<string, string> = { BTCUSDT: "Bitcoin", ETHUSDT: "Ethereum", SOLUSDT: "Solana", BNBUSDT: "BNB" };
+
+async function avisar(tipo: "compra" | "venda", par: string, preco: number, rsiAtual: number | null, teste = false) {
+  const cfg = await db("robo_config?chave=eq.ntfy_topico&select=valor");
+  const topico = cfg?.[0]?.valor;
+  if (!topico) return;
+  const nome = NOMES[par] ?? par.replace("USDT", "");
+  const valor = preco.toLocaleString("pt-BR", { style: "currency", currency: "USD" });
+  const rsiTxt = rsiAtual == null ? "" : ` · RSI ${rsiAtual.toLocaleString("pt-BR", { maximumFractionDigits: 1 })}`;
+  const titulo = `${teste ? "[TESTE] " : ""}${tipo === "compra" ? "COMPRA" : "VENDA"}: ${nome}`;
+  const msg = tipo === "compra"
+    ? `Sinal de compra em ${nome} a ${valor}${rsiTxt}. Se for comprar, faça pelo app da Binance.`
+    : `Sinal de venda em ${nome} a ${valor}${rsiTxt}. Se você comprou ${nome}, é hora de vender pelo app da Binance.`;
+  await fetch("https://ntfy.sh/", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      topic: topico,
+      title: titulo,
+      message: msg,
+      priority: 5,
+      tags: [tipo === "compra" ? "chart_with_upwards_trend" : "chart_with_downwards_trend"],
+      click: `https://www.binance.com/pt-BR/trade/${par.replace("USDT", "_USDT")}?type=spot`,
+    }),
+  });
+}
+
 // Banca única para várias moedas (até max_posicoes ao mesmo tempo).
 // Só age na vela que acabou de fechar. Primeiro vende o que deu sinal de venda,
 // depois compra as que deram sinal (RSI mais baixo primeiro), dividindo o dinheiro livre pelas vagas.
@@ -92,7 +120,7 @@ async function rodarBanca(c: any, cache: Map<string, Awaited<ReturnType<typeof c
   const pares: string[] = String(c.par).split(",");
   const modo = c.modo ?? "simulado";
   const max = Number(c.max_posicoes ?? 1);
-  const dados: Record<string, { fechados: Candle[]; atual: number; sinal: string | null; rsi: number | null; t: number }> = {};
+  const dados: Record<string, { fechados: Candle[]; atual: number; sinal: string | null; anterior: string | null; rsi: number | null; t: number }> = {};
   for (const p of pares) {
     const chave = `${p}_${c.tempo}`;
     if (!cache.has(chave)) cache.set(chave, await candles(p, c.tempo));
@@ -100,13 +128,23 @@ async function rodarBanca(c: any, cache: Map<string, Awaited<ReturnType<typeof c
     const fech = fechados.map((k) => k.c);
     const { sinais, ind } = calcularSinais(fech, c.estrategia as Estrategia);
     const i = fechados.length - 1;
-    dados[p] = { fechados, atual, sinal: sinais[i], rsi: (ind(i) as any).rsi ?? null, t: fechados[i].t };
+    dados[p] = { fechados, atual, sinal: sinais[i], anterior: i > 0 ? sinais[i - 1] : null, rsi: (ind(i) as any).rsi ?? null, t: fechados[i].t };
   }
   const ultimo = Math.min(...pares.map((p) => dados[p].t));
   let caixa = Number(c.caixa);
   const posicoes: Record<string, { qtd: number; custo: number; preco: number; em: string }> = { ...(c.posicoes ?? {}) };
   const novas: Record<string, unknown>[] = [];
   let erro: string | null = modo === "simulado" ? null : temChaves(modo);
+
+  // Aviso no celular quando uma moeda ENTRA em sinal (não repete enquanto o sinal continua)
+  if (c.ultimo_candle != null && ultimo > Number(c.ultimo_candle)) {
+    for (const p of pares) {
+      const d = dados[p];
+      if (d.sinal && d.sinal !== d.anterior) {
+        await avisar(d.sinal as "compra" | "venda", p, d.atual, d.rsi).catch(() => {});
+      }
+    }
+  }
 
   if (!erro && c.ultimo_candle != null && ultimo > Number(c.ultimo_candle)) {
     const quando = new Date().toISOString();
@@ -319,6 +357,10 @@ Deno.serve(async (req) => {
       for (const p of pares) mapa[p] = (await candles(p, tempo, qtd)).fechados;
       const max = Math.max(1, Math.min(pares.length, Number(u.searchParams.get("max") ?? 1) || 1));
       return json({ ok: true, resultado: backtestBanca(mapa, "rsi", 1000, max) });
+    }
+    if (acao === "testar_aviso") {
+      await avisar("compra", "SOLUSDT", 106.9, 28.4, true);
+      return json({ ok: true });
     }
     if (acao === "testar_conta") return json({ ok: true, conta: await testarConta("testnet") });
     return json({ ok: false, erro: "Ação desconhecida" }, 400);

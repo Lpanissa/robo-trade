@@ -41,7 +41,7 @@ function useConta() {
   }, []);
   useEffect(() => {
     carregar();
-    const id = setInterval(carregar, 30000);
+    const id = setInterval(carregar, 15000);
     return () => clearInterval(id);
   }, [carregar]);
   return { real, carteiras, erro, atualizando, carregar };

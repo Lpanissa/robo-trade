@@ -177,7 +177,7 @@ function ContaRealCard({ r, t, s }: { r: ContaReal; t: Tema; s: Estilos }) {
     <View style={[s.painel, s.cartao, { marginBottom: 16 }]}>
       <View style={s.linhaEntre}>
         <View style={{ flex: 1 }}>
-          <Text style={s.rotulo}>Minha conta real · Binance</Text>
+          <Text style={s.rotulo}>Real - Binance</Text>
           <Text style={s.precoGrande}>{reais(r.total_brl)}</Text>
           <Text style={s.textoSuave}>{dinheiro(r.total_usdt)}</Text>
         </View>

@@ -6,7 +6,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import Svg, { Path, Rect } from "react-native-svg";
 import {
   ehBanca, buscarCarteiras, Carteira, dataHora, dinheiro, MOEDAS, numero, pct,
-  buscarContaReal, ContaReal, reais, buscarVelas, OperacaoReal, buscarSaldoHist,
+  buscarContaReal, ContaReal, reais, buscarVelas, OperacaoReal,
 } from "./src/api";
 import Velas, { LegendaVelas, Vela } from "./src/Velas";
 import { Atualizacao, baixarAtualizacao, ouvirToqueNaNotificacao, procurarAtualizacao } from "./src/atualizacao";
@@ -145,7 +145,6 @@ function Agora({ t, s, r, carteiras, oculto }: { t: Tema; s: Estilos; r: ContaRe
     <View style={{ gap: 14 }}>
       <PosicoesCard r={r} t={t} s={s} oculto={oculto} aoTocar={setPar} />
       <ContaRealCard r={r} t={t} s={s} oculto={oculto} />
-      <SaldoCard t={t} s={s} oculto={oculto} />
       <GraficoCard r={r} t={t} s={s} oculto={oculto} par={par} setPar={setPar} />
       {banca && <SinaisCard c={banca} t={t} s={s} />}
     </View>
@@ -337,63 +336,6 @@ function DinheiroLivre({ r, t, s }: { r: ContaReal; t: Tema; s: Estilos }) {
           {pouco ? "· não dá pra nenhuma compra" : `· dá pra ${compras} ${compras === 1 ? "compra" : "compras"} de ${numero(POR_COMPRA, 1)}`}
         </Text>
       </Text>
-    </View>
-  );
-}
-
-// Gráfico de como o saldo total foi mudando
-const PERIODOS_SALDO = [
-  { id: "dia", nome: "24 horas", ms: 24 * 3600_000 },
-  { id: "semana", nome: "Semana", ms: 7 * 24 * 3600_000 },
-  { id: "mes", nome: "Mês", ms: 30 * 24 * 3600_000 },
-];
-function SaldoCard({ t, s, oculto }: { t: Tema; s: Estilos; oculto: boolean }) {
-  const [periodo, setPeriodo] = useState("dia");
-  const [pontos, setPontos] = useState<{ t: number; brl: number }[]>([]);
-  const [largura, setLargura] = useState(0);
-  useEffect(() => {
-    let vivo = true;
-    const ms = PERIODOS_SALDO.find((p) => p.id === periodo)!.ms;
-    const ler = () => buscarSaldoHist(Date.now() - ms).then((l) => vivo && setPontos(l)).catch(() => {});
-    ler();
-    const id = setInterval(ler, 60000);
-    return () => { vivo = false; clearInterval(id); };
-  }, [periodo]);
-  const A = 120;
-  const ini = pontos[0]?.brl, fim = pontos[pontos.length - 1]?.brl;
-  const variacao = ini && fim ? (fim / ini - 1) * 100 : null;
-  const cor = variacao == null || variacao >= 0 ? t.alta : t.baixa;
-  let caminho = "";
-  if (pontos.length > 1 && largura > 0) {
-    const min = Math.min(...pontos.map((p) => p.brl)), max = Math.max(...pontos.map((p) => p.brl));
-    const faixa = max - min || 1;
-    const t0 = pontos[0].t, t1 = pontos[pontos.length - 1].t || t0 + 1;
-    caminho = pontos.map((p, i) => `${i ? "L" : "M"}${(((p.t - t0) / (t1 - t0 || 1)) * largura).toFixed(1)} ${(A - 6 - ((p.brl - min) / faixa) * (A - 12)).toFixed(1)}`).join(" ");
-  }
-  return (
-    <View style={[s.painel, s.cartao]}>
-      <View style={s.linhaEntre}>
-        <Text style={s.cartaoTitulo}>Seu saldo</Text>
-        <Text style={[s.textoNormal, { color: cor, fontWeight: "700" }]}>{oculto ? "••••" : pct(variacao)}</Text>
-      </View>
-      <View style={[s.chips, { marginBottom: 0 }]}>
-        {PERIODOS_SALDO.map((p) => <Chip key={p.id} s={s} ativo={p.id === periodo} texto={p.nome} onPress={() => setPeriodo(p.id)} />)}
-      </View>
-      <View style={{ height: A }} onLayout={(e) => setLargura(e.nativeEvent.layout.width)}>
-        {pontos.length > 1 ? (
-          <Svg width={largura} height={A}>
-            <Path d={caminho} stroke={cor} strokeWidth={2} fill="none" strokeLinejoin="round" />
-          </Svg>
-        ) : (
-          <Text style={s.textoSuave}>O gráfico vai se formando: o robô guarda o saldo a cada 10 minutos.</Text>
-        )}
-      </View>
-      {pontos.length > 1 && !oculto && (
-        <View style={s.linhaEntre}>
-          <Text style={s.textoSuave}>{reais(ini)}</Text>
-          <Text style={s.textoSuave}>agora {reais(fim)}</Text>
-        </View>
-      )}
     </View>
   );
 }

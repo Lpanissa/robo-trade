@@ -13,17 +13,9 @@ async function atualizarContaReal() {
   if (dados) await avisarOperacoesReais(dados).catch(() => {});
   await db("robo_conta_real", { method: "POST", body: JSON.stringify({ id: 1, ...(dados ?? {}), erro, atualizado_em: new Date().toISOString() }), headers: { Prefer: "return=minimal,resolution=merge-duplicates" } });
   if (dados) {
-    await guardarSaldo(dados).catch(() => {});
     await avisarPoucoLivre(dados).catch(() => {});
   }
   return dados ?? { erro };
-}
-
-// Foto do saldo a cada 10 minutos, para o gráfico do saldo no app
-async function guardarSaldo(dados: NonNullable<Awaited<ReturnType<typeof lerContaReal>>>) {
-  const ult = await db("robo_saldo_hist?select=em&order=em.desc&limit=1");
-  if (ult?.[0] && Date.now() - new Date(ult[0].em).getTime() < 10 * 60_000) return;
-  await db("robo_saldo_hist", { method: "POST", body: JSON.stringify({ em: new Date().toISOString(), total_usdt: dados.total_usdt, total_brl: dados.total_brl }), headers: { Prefer: "return=minimal" } });
 }
 
 // Cada compra dos bots usa 5,5 USDT. Avisa uma vez quando o USDT livre não dá nem pra uma compra.

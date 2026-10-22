@@ -1,0 +1,38 @@
+name: Dados da análise
+
+# Baixa o histórico de preços (velas) das 4 moedas para a página de análise.
+# Só roda quando o arquivo analise/pedido.txt muda. Não mexe no app.
+on:
+  push:
+    branches: [main]
+    paths: ["analise/pedido.txt"]
+
+permissions:
+  contents: write
+
+jobs:
+  velas:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Baixar velas
+        env:
+          CHAVE: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZ5eGtzdnlkeHd2eWdqZWJhbm5vIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTExMzE5MDMsImV4cCI6MjEwNjcwNzkwM30.qUHr5gl00vF2JG7YaostqpOqhEMSEPSci1ySH1D-Fik
+        run: |
+          mkdir -p analise/dados
+          for par in BTCUSDT ETHUSDT SOLUSDT BNBUSDT; do
+            for tempo in 15m 1h 4h 1d; do
+              curl -sS --fail --retry 3 --max-time 140 \
+                -H "Authorization: Bearer $CHAVE" \
+                "https://fyxksvydxwvygjebanno.supabase.co/functions/v1/analise?velas=1&par=$par&tempo=$tempo&dias=430" \
+                -o "analise/dados/${par}_${tempo}.json"
+              ls -la "analise/dados/${par}_${tempo}.json"
+            done
+          done
+      - name: Guardar
+        run: |
+          git config user.name "robo-trade"
+          git config user.email "robo-trade@users.noreply.github.com"
+          git add analise/dados
+          git commit -m "Dados da análise atualizados [skip ci]" || exit 0
+          git push

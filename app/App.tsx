@@ -494,7 +494,7 @@ function LinhaReal({ o, t, s, brl, oculto, ultima }: { o: OperacaoReal; t: Tema;
         <Svg width={10} height={10}><Path d={compra ? "M5 1 L9 8 L1 8 Z" : "M5 9 L9 2 L1 2 Z"} fill={compra ? t.alta : t.baixa} /></Svg>
       </View>
       <View style={{ flex: 1 }}>
-        <Text style={[s.textoNormal, { fontWeight: "700" }]}>{compra ? "Compra" : "Venda"} {nomeMoeda(o.moeda + "USDT")}</Text>
+        <Text style={[s.textoNormal, { fontWeight: "700" }]}>{nomeCompleto(o.moeda)}</Text>
         <Text style={s.textoSuave}>{hora} · a {dinheiro(o.preco_usdt)} · {oculto ? "••••" : reais(o.valor_usdt * brl)}</Text>
       </View>
       {!compra && o.lucro_usdt != null && (
@@ -508,6 +508,11 @@ function LinhaReal({ o, t, s, brl, oculto, ultima }: { o: OperacaoReal; t: Tema;
 }
 
 // ---------------- Peças ----------------
+// Nome inteiro da moeda (usado no histórico)
+function nomeCompleto(moeda: string) {
+  return ({ BTC: "Bitcoin", ETH: "Ethereum", SOL: "Solana", BNB: "BNB" } as Record<string, string>)[moeda] ?? moeda;
+}
+
 // Mostra as moedas abreviadas: BTC, ETH, SOL, BNB
 function nomeMoeda(par: string) {
   return par.replace(/USDT$/, "");

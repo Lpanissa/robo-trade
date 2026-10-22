@@ -25,15 +25,34 @@ export type OperacaoReal = {
   qtd: number; preco_usdt: number; valor_usdt: number; lucro_usdt: number | null; lucro_pct: number | null;
 };
 
+// Diagnóstico: o que a Binance devolveu (sem chaves)
+export async function diagnostico() {
+  const key = Deno.env.get("BINANCE_LEITURA_KEY")!, secret = Deno.env.get("BINANCE_LEITURA_SECRET")!;
+  const c = await ler(key, secret, "/api/v3/account", { omitZeroBalances: "true" });
+  return { chaves: Object.keys(c), n: Array.isArray(c.balances) ? c.balances.length : null, tipo: c.accountType, permissoes: c.permissions, amostra: (c.balances ?? []).slice(0, 6) };
+}
+
 export async function lerContaReal() {
   const key = Deno.env.get("BINANCE_LEITURA_KEY");
   const secret = Deno.env.get("BINANCE_LEITURA_SECRET");
   if (!key || !secret) return null;
 
-  const conta = await ler(key, secret, "/api/v3/account");
-  const saldos = (conta.balances ?? [])
-    .map((b: any) => ({ moeda: String(b.asset), qtd: Number(b.free) + Number(b.locked) }))
-    .filter((b: { qtd: number }) => b.qtd > 0);
+  const conta = await ler(key, secret, "/api/v3/account", { omitZeroBalances: "true" });
+  if (!Array.isArray(conta.balances)) throw new Error(`Binance mandou a conta sem saldos (${Object.keys(conta).join(",").slice(0, 120)})`);
+  // Moedas no Earn Flexível aparecem como "LD" + moeda (LDUSDT, LDETH...). Somamos com a moeda normal,
+  // mas guardamos quanto está no Earn: os bots só conseguem usar o que está na Spot.
+  const porMoeda: Record<string, { qtd: number; earn: number }> = {};
+  for (const b of conta.balances ?? []) {
+    const bruto = String(b.asset);
+    const qtd = Number(b.free) + Number(b.locked);
+    if (!(qtd > 0)) continue;
+    const earn = bruto.startsWith("LD") && ["USDT", "USDC", "FDUSD", "BRL", "BTC", "ETH", "SOL", "BNB"].includes(bruto.slice(2));
+    const moeda = earn ? bruto.slice(2) : bruto;
+    const p = (porMoeda[moeda] ??= { qtd: 0, earn: 0 });
+    p.qtd += qtd;
+    if (earn) p.earn += qtd;
+  }
+  const saldos = Object.entries(porMoeda).map(([moeda, v]) => ({ moeda, qtd: v.qtd, earn: v.earn }));
 
   // Preços públicos para converter tudo em USDT e em reais
   const precos: Record<string, number> = {};
@@ -50,10 +69,11 @@ export async function lerContaReal() {
   };
 
   const moedas = saldos
-    .map((s: { moeda: string; qtd: number }) => ({ ...s, usdt: emUsdt(s.moeda, s.qtd) }))
+    .map((s: { moeda: string; qtd: number; earn: number }) => ({ ...s, usdt: emUsdt(s.moeda, s.qtd) }))
     .filter((s: { usdt: number }) => s.usdt >= 0.01)
     .sort((a: { usdt: number }, b: { usdt: number }) => b.usdt - a.usdt);
   const total = moedas.reduce((a: number, m: { usdt: number }) => a + m.usdt, 0);
+  const earnUsdt = saldos.reduce((a: number, m: { moeda: string; earn: number }) => a + emUsdt(m.moeda, m.earn), 0);
 
   // Histórico de negociações (só leitura) e preço médio de cada moeda
   const negocios: { em: number; moeda: string; par: string; compra: boolean; qtd: number; quote: number; cot: string; taxa: number; taxaMoeda: string; preco: number }[] = [];
@@ -115,7 +135,7 @@ export async function lerContaReal() {
   }
 
   return {
-    moedas, total_usdt: total, total_brl: total * usdtBrl, usdt_brl: usdtBrl, pode_negociar: !!conta.canTrade,
+    moedas, total_usdt: total, total_brl: total * usdtBrl, usdt_brl: usdtBrl, pode_negociar: !!conta.canTrade, earn_usdt: earnUsdt,
     operacoes: operacoes.reverse().slice(0, 500), posicoes,
   };
 }

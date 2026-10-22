@@ -3,7 +3,7 @@
 // Carteiras "simulado" só anotam; carteiras "testnet" mandam ordens na Binance Testnet.
 import { backtest, backtestBanca, backtestDCA, backtestRsiAlvo, calcularSinais, Candle, Estrategia, ESTRATEGIAS, motivo, TAXA } from "./logica.ts";
 import { comprar, temChaves, testarConta, vender } from "./binance.ts";
-import { lerContaReal } from "./leitura.ts";
+import { diagnostico, lerContaReal } from "./leitura.ts";
 
 // Guarda a foto da conta real (só leitura) para o app mostrar
 async function atualizarContaReal() {
@@ -14,6 +14,7 @@ async function atualizarContaReal() {
   await db("robo_conta_real", { method: "POST", body: JSON.stringify({ id: 1, ...(dados ?? {}), erro, atualizado_em: new Date().toISOString() }), headers: { Prefer: "return=minimal,resolution=merge-duplicates" } });
   if (dados) {
     await avisarPoucoLivre(dados).catch(() => {});
+    await avisarEarn(dados).catch(() => {});
   }
   return dados ?? { erro };
 }
@@ -21,7 +22,8 @@ async function atualizarContaReal() {
 // Cada compra dos bots usa 5,5 USDT. Avisa uma vez quando o USDT livre não dá nem pra uma compra.
 const POR_COMPRA = 5.5;
 async function avisarPoucoLivre(dados: NonNullable<Awaited<ReturnType<typeof lerContaReal>>>) {
-  const livre = dados.moedas.find((m) => m.moeda === "USDT")?.qtd ?? 0;
+  const u = dados.moedas.find((m) => m.moeda === "USDT");
+  const livre = u ? u.qtd - (u.earn ?? 0) : 0;
   const cfg = await db("robo_config?chave=eq.aviso_livre&select=valor");
   const jaAvisou = cfg?.[0]?.valor === "1";
   const falta = livre < POR_COMPRA;
@@ -30,6 +32,20 @@ async function avisarPoucoLivre(dados: NonNullable<Awaited<ReturnType<typeof ler
   }
   if (falta !== jaAvisou) {
     await db("robo_config", { method: "POST", body: JSON.stringify({ chave: "aviso_livre", valor: falta ? "1" : "0" }), headers: { Prefer: "return=minimal,resolution=merge-duplicates" } });
+  }
+}
+
+// Avisa uma vez quando a Binance colocar dinheiro no Earn (os bots só operam o que está na Spot)
+async function avisarEarn(dados: NonNullable<Awaited<ReturnType<typeof lerContaReal>>>) {
+  const temEarn = (dados.earn_usdt ?? 0) >= 1;
+  const cfg = await db("robo_config?chave=eq.aviso_earn&select=valor");
+  const jaAvisou = cfg?.[0]?.valor === "1";
+  if (temEarn && !jaAvisou) {
+    const v = (dados.earn_usdt * (dados.usdt_brl || 0)).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+    await enviarPush("Dinheiro foi pro Earn", `A Binance colocou ${v} no Earn Flexível. Os bots não conseguem comprar nem vender assim: resgate pra Spot e desligue a inscrição automática.`).catch(() => {});
+  }
+  if (temEarn !== jaAvisou) {
+    await db("robo_config", { method: "POST", body: JSON.stringify({ chave: "aviso_earn", valor: temEarn ? "1" : "0" }), headers: { Prefer: "return=minimal,resolution=merge-duplicates" } });
   }
 }
 
@@ -547,6 +563,7 @@ Deno.serve(async (req) => {
       }
       return json({ ok: true, resultado: out });
     }
+    if (acao === "diagnostico") return json({ ok: true, ...(await diagnostico()) });
     if (acao === "resumo_dia") return json({ ok: true, resumo: await resumoDoDia() });
     if (acao === "testar_push") {
       return json({ ok: true, ...(await enviarPush("PanissAsset", "Teste: os avisos de compra e venda vão chegar aqui.")) });

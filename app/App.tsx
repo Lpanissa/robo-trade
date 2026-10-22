@@ -137,19 +137,67 @@ const INTERVALOS = [
 // ---------------- Agora ----------------
 function Agora({ t, s, r, carteiras, oculto }: { t: Tema; s: Estilos; r: ContaReal; carteiras: Carteira[] | null; oculto: boolean }) {
   const banca = (carteiras ?? []).find((c) => ehBanca(c));
+  // Moeda do gráfico: começa na que você tem; tocar numa posição aberta muda o gráfico
+  const [par, setPar] = useState(PARES.find((p) => r.posicoes[p.replace("USDT", "")]) ?? "SOLUSDT");
   return (
     <View style={{ gap: 14 }}>
+      <PosicoesCard r={r} t={t} s={s} oculto={oculto} aoTocar={setPar} />
       <ContaRealCard r={r} t={t} s={s} oculto={oculto} />
-      <GraficoCard r={r} t={t} s={s} oculto={oculto} />
+      <GraficoCard r={r} t={t} s={s} oculto={oculto} par={par} setPar={setPar} />
       {banca && <SinaisCard c={banca} t={t} s={s} />}
     </View>
   );
 }
 
-function GraficoCard({ r, t, s, oculto }: { r: ContaReal; t: Tema; s: Estilos; oculto: boolean }) {
-  // Começa na moeda que você tem
-  const inicial = PARES.find((p) => r.posicoes[p.replace("USDT", "")]) ?? "SOLUSDT";
-  const [par, setPar] = useState(inicial);
+// Posições abertas em destaque, no topo: o que está comprado agora e se está no lucro
+function PosicoesCard({ r, t, s, oculto, aoTocar }: { r: ContaReal; t: Tema; s: Estilos; oculto: boolean; aoTocar: (par: string) => void }) {
+  const brl = r.usdt_brl ?? 0;
+  const lista = Object.entries(r.posicoes ?? {}).map(([moeda, pos]) => {
+    const m = r.moedas.find((x) => x.moeda === moeda);
+    const preco = m && m.qtd ? m.usdt / m.qtd : pos.preco_medio;
+    const res = (preco / pos.preco_medio - 1) * 100;
+    const ganho = (preco - pos.preco_medio) * pos.qtd;
+    return { moeda, pos, preco, res, ganho, valor: pos.qtd * preco };
+  });
+  const aberta = lista.length > 0;
+  return (
+    <View style={[s.painel, s.cartao, { borderWidth: 2, borderColor: aberta ? t.acento : t.borda }]}>
+      <View style={s.linhaEntre}>
+        <Text style={s.cartaoTitulo}>Posições abertas</Text>
+        <View style={[s.pilula, { backgroundColor: aberta ? t.acentoFraco : t.painel2 }]}>
+          <View style={[s.ponto, { backgroundColor: aberta ? t.acento : t.suave }]} />
+          <Text style={[s.pilulaTexto, { color: aberta ? t.acento : t.suave }]}>{aberta ? `${lista.length} em operação` : "Nenhuma"}</Text>
+        </View>
+      </View>
+      {!aberta ? (
+        <Text style={s.textoSuave}>Você não está em nenhuma operação agora. Os bots estão esperando o sinal de compra.</Text>
+      ) : (
+        lista.map((p) => (
+          <Pressable key={p.moeda} onPress={() => aoTocar(p.moeda + "USDT")}
+            style={[s.indicador, { backgroundColor: p.res >= 0 ? t.altaFraca : t.baixaFraca, gap: 4 }]}>
+            <View style={s.linhaEntre}>
+              <Text style={[s.cartaoTitulo, { fontSize: 18 }]}>{nomeMoeda(p.moeda + "USDT")}</Text>
+              <Text style={[s.precoGrande, { fontSize: 26, color: corDoNumero(t, Math.round(p.res * 100) / 100) }]}>{pct(p.res)}</Text>
+            </View>
+            <View style={s.linhaEntre}>
+              <Text style={s.textoSuave}>Comprou a {dinheiro(p.pos.preco_medio)}</Text>
+              <Text style={[s.textoNormal, { fontWeight: "700", color: corDoNumero(t, p.ganho) }]}>
+                {oculto ? "••••" : `${p.ganho >= 0 ? "+" : "-"}${reais(Math.abs(p.ganho) * brl)}`}
+              </Text>
+            </View>
+            <View style={s.linhaEntre}>
+              <Text style={s.textoSuave}>Agora {dinheiro(p.preco)}</Text>
+              <Text style={s.textoSuave}>{oculto ? "••••" : `vale ${reais(p.valor * brl)}`}</Text>
+            </View>
+            <Text style={s.miudo}>Desde {p.pos.desde ? dataHora(p.pos.desde) : "-"} · toque para ver no gráfico</Text>
+          </Pressable>
+        ))
+      )}
+    </View>
+  );
+}
+
+function GraficoCard({ r, t, s, oculto, par, setPar }: { r: ContaReal; t: Tema; s: Estilos; oculto: boolean; par: string; setPar: (p: string) => void }) {
   const [intervalo, setIntervalo] = useState("1h");
   const [velas, setVelas] = useState<Vela[]>([]);
   const [erro, setErro] = useState<string | null>(null);

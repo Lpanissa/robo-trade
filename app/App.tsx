@@ -6,7 +6,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import Svg, { Path, Rect } from "react-native-svg";
 import {
   ehBanca, buscarCarteiras, Carteira, dataHora, dinheiro, MOEDAS, numero, pct,
-  buscarContaReal, ContaReal, reais, buscarVelas, OperacaoReal,
+  buscarContaReal, ContaReal, reais, buscarVelas, OperacaoReal, buscarSaldoHist,
 } from "./src/api";
 import Velas, { LegendaVelas, Vela } from "./src/Velas";
 import { Atualizacao, baixarAtualizacao, ouvirToqueNaNotificacao, procurarAtualizacao } from "./src/atualizacao";
@@ -127,6 +127,8 @@ function Tela() {
 }
 
 const PARES = ["SOLUSDT", "ETHUSDT", "BNBUSDT", "BTCUSDT"];
+const ALVO_PCT = 2.9; // os bots vendem com 2,9% de lucro
+const POR_COMPRA = 5.5; // cada compra dos bots usa 5,5 USDT
 const INTERVALOS = [
   { id: "15m", nome: "15 min", ms: 15 * 60_000 },
   { id: "1h", nome: "1 hora", ms: 3600_000 },
@@ -143,6 +145,7 @@ function Agora({ t, s, r, carteiras, oculto }: { t: Tema; s: Estilos; r: ContaRe
     <View style={{ gap: 14 }}>
       <PosicoesCard r={r} t={t} s={s} oculto={oculto} aoTocar={setPar} />
       <ContaRealCard r={r} t={t} s={s} oculto={oculto} />
+      <SaldoCard t={t} s={s} oculto={oculto} />
       <GraficoCard r={r} t={t} s={s} oculto={oculto} par={par} setPar={setPar} />
       {banca && <SinaisCard c={banca} t={t} s={s} />}
     </View>
@@ -221,7 +224,7 @@ function GraficoCard({ r, t, s, oculto, par, setPar }: { r: ContaReal; t: Tema; 
         {INTERVALOS.map((i) => <Chip key={i.id} s={s} ativo={i.id === intervalo} texto={i.nome} onPress={() => setIntervalo(i.id)} />)}
       </View>
       {erro ? <Text style={[s.textoSuave, { color: t.baixa }]}>{erro}</Text> : velas.length ? (
-        <Velas velas={velas} t={t} medio={pos?.preco_medio ?? null} marcas={marcas} passoMs={passoMs} />
+        <Velas velas={velas} t={t} medio={pos?.preco_medio ?? null} alvo={pos ? pos.preco_medio * (1 + ALVO_PCT / 100) : null} marcas={marcas} passoMs={passoMs} />
       ) : <ActivityIndicator color={t.acento} style={{ height: 280 }} />}
       <LegendaVelas t={t} temPosicao={!!pos} />
       {pos ? (
@@ -237,9 +240,18 @@ function GraficoCard({ r, t, s, oculto, par, setPar }: { r: ContaReal; t: Tema; 
               {ganhoUsd == null || oculto ? "••••" : `${ganhoUsd >= 0 ? "+" : "-"}${reais(Math.abs(ganhoUsd) * brl)}`}
             </Text>
           </View>
-          <Text style={s.textoSuave}>
-            {resultado == null ? "" : resultado >= 0 ? "Acima do preço que você pagou: no lucro." : "Abaixo do preço que você pagou: no prejuízo por enquanto."}
-          </Text>
+          {atual != null && (() => {
+            const alvo = pos.preco_medio * (1 + ALVO_PCT / 100);
+            const falta = (alvo / atual - 1) * 100;
+            return (
+              <View style={s.linhaEntre}>
+                <Text style={s.textoSuave}>Alvo de venda {dinheiro(alvo)}</Text>
+                <Text style={[s.textoNormal, { color: t.alta, fontWeight: "700" }]}>
+                  {falta > 0 ? `faltam ${numero(falta, 1)}%` : "alvo atingido"}
+                </Text>
+              </View>
+            );
+          })()}
         </View>
       ) : (
         <Text style={s.textoSuave}>Você não tem {nomeMoeda(par)} agora. Quando o bot comprar, a linha do seu preço aparece no gráfico.</Text>
@@ -295,6 +307,97 @@ function SinaisCard({ c, t, s }: { c: Carteira; t: Tema; s: Estilos }) {
   );
 }
 
+// Lucro das vendas de hoje, logo abaixo do saldo
+function LucroHoje({ r, t, s, oculto }: { r: ContaReal; t: Tema; s: Estilos; oculto: boolean }) {
+  const desde = inicioDe(0);
+  const vendas = r.operacoes.filter((o) => o.tipo === "venda" && o.em >= desde && o.lucro_usdt != null);
+  const lucro = vendas.reduce((a, o) => a + (o.lucro_usdt ?? 0), 0) * (r.usdt_brl ?? 0);
+  return (
+    <Text style={[s.textoSuave, { marginTop: 4 }]}>
+      Hoje:{" "}
+      <Text style={{ color: vendas.length ? corDoNumero(t, Math.round(lucro * 100) / 100) : t.suave, fontWeight: "700" }}>
+        {vendas.length ? (oculto ? "••••" : `${lucro > 0 ? "+" : lucro < 0 ? "-" : ""}${reais(Math.abs(lucro))}`) : "sem vendas"}
+      </Text>
+      {vendas.length ? ` (${vendas.length} ${vendas.length === 1 ? "venda" : "vendas"})` : ""}
+    </Text>
+  );
+}
+
+// Quanto USDT está livre e pra quantas compras dos bots ele dá
+function DinheiroLivre({ r, t, s }: { r: ContaReal; t: Tema; s: Estilos }) {
+  const livre = r.moedas.find((m) => m.moeda === "USDT")?.qtd ?? 0;
+  const compras = Math.floor(livre / POR_COMPRA);
+  const pouco = compras === 0;
+  return (
+    <View style={[s.indicador, { flexDirection: "row", alignItems: "center", gap: 10, paddingVertical: 10, backgroundColor: pouco ? t.baixaFraca : t.painel2 }]}>
+      <View style={[s.ponto, { backgroundColor: pouco ? t.baixa : compras === 1 ? t.acento : t.alta }]} />
+      <Text style={[s.textoNormal, { flex: 1 }]}>
+        {numero(livre, 2)} USDT livres{" "}
+        <Text style={s.textoSuave}>
+          {pouco ? "· não dá pra nenhuma compra" : `· dá pra ${compras} ${compras === 1 ? "compra" : "compras"} de ${numero(POR_COMPRA, 1)}`}
+        </Text>
+      </Text>
+    </View>
+  );
+}
+
+// Gráfico de como o saldo total foi mudando
+const PERIODOS_SALDO = [
+  { id: "dia", nome: "24 horas", ms: 24 * 3600_000 },
+  { id: "semana", nome: "Semana", ms: 7 * 24 * 3600_000 },
+  { id: "mes", nome: "Mês", ms: 30 * 24 * 3600_000 },
+];
+function SaldoCard({ t, s, oculto }: { t: Tema; s: Estilos; oculto: boolean }) {
+  const [periodo, setPeriodo] = useState("dia");
+  const [pontos, setPontos] = useState<{ t: number; brl: number }[]>([]);
+  const [largura, setLargura] = useState(0);
+  useEffect(() => {
+    let vivo = true;
+    const ms = PERIODOS_SALDO.find((p) => p.id === periodo)!.ms;
+    const ler = () => buscarSaldoHist(Date.now() - ms).then((l) => vivo && setPontos(l)).catch(() => {});
+    ler();
+    const id = setInterval(ler, 60000);
+    return () => { vivo = false; clearInterval(id); };
+  }, [periodo]);
+  const A = 120;
+  const ini = pontos[0]?.brl, fim = pontos[pontos.length - 1]?.brl;
+  const variacao = ini && fim ? (fim / ini - 1) * 100 : null;
+  const cor = variacao == null || variacao >= 0 ? t.alta : t.baixa;
+  let caminho = "";
+  if (pontos.length > 1 && largura > 0) {
+    const min = Math.min(...pontos.map((p) => p.brl)), max = Math.max(...pontos.map((p) => p.brl));
+    const faixa = max - min || 1;
+    const t0 = pontos[0].t, t1 = pontos[pontos.length - 1].t || t0 + 1;
+    caminho = pontos.map((p, i) => `${i ? "L" : "M"}${(((p.t - t0) / (t1 - t0 || 1)) * largura).toFixed(1)} ${(A - 6 - ((p.brl - min) / faixa) * (A - 12)).toFixed(1)}`).join(" ");
+  }
+  return (
+    <View style={[s.painel, s.cartao]}>
+      <View style={s.linhaEntre}>
+        <Text style={s.cartaoTitulo}>Seu saldo</Text>
+        <Text style={[s.textoNormal, { color: cor, fontWeight: "700" }]}>{oculto ? "••••" : pct(variacao)}</Text>
+      </View>
+      <View style={[s.chips, { marginBottom: 0 }]}>
+        {PERIODOS_SALDO.map((p) => <Chip key={p.id} s={s} ativo={p.id === periodo} texto={p.nome} onPress={() => setPeriodo(p.id)} />)}
+      </View>
+      <View style={{ height: A }} onLayout={(e) => setLargura(e.nativeEvent.layout.width)}>
+        {pontos.length > 1 ? (
+          <Svg width={largura} height={A}>
+            <Path d={caminho} stroke={cor} strokeWidth={2} fill="none" strokeLinejoin="round" />
+          </Svg>
+        ) : (
+          <Text style={s.textoSuave}>O gráfico vai se formando: o robô guarda o saldo a cada 10 minutos.</Text>
+        )}
+      </View>
+      {pontos.length > 1 && !oculto && (
+        <View style={s.linhaEntre}>
+          <Text style={s.textoSuave}>{reais(ini)}</Text>
+          <Text style={s.textoSuave}>agora {reais(fim)}</Text>
+        </View>
+      )}
+    </View>
+  );
+}
+
 // Conta real da Binance: só mostra (o app não compra nem vende)
 function ContaRealCard({ r, t, s, oculto }: { r: ContaReal; t: Tema; s: Estilos; oculto: boolean }) {
   const x = (v: string) => (oculto ? "••••" : v);
@@ -305,12 +408,14 @@ function ContaRealCard({ r, t, s, oculto }: { r: ContaReal; t: Tema; s: Estilos;
           <Text style={s.rotulo}>Real - Binance</Text>
           <Text style={s.precoGrande}>{oculto ? "R$ ••••••" : reais(r.total_brl)}</Text>
           <Text style={s.textoSuave}>{x(dinheiro(r.total_usdt))}</Text>
+          <LucroHoje r={r} t={t} s={s} oculto={oculto} />
         </View>
         <View style={{ alignItems: "flex-end" }}>
           <Text style={s.rotulo}>Atualizado</Text>
           <Text style={s.textoSuave}>{dataHora(r.atualizado_em)}</Text>
         </View>
       </View>
+      <DinheiroLivre r={r} t={t} s={s} />
       {r.erro ? (
         <View style={[s.indicador, { backgroundColor: t.baixaFraca }]}>
           <Text style={[s.textoNormal, { color: t.baixa }]}>{r.erro}</Text>

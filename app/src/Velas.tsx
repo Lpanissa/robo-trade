@@ -16,7 +16,7 @@ function formatar(n: number) {
   return n.toLocaleString("pt-BR", { minimumFractionDigits: casas, maximumFractionDigits: casas });
 }
 
-export default function Velas({ velas, t, medio, marcas, passoMs }: { velas: Vela[]; t: Tema; medio: number | null; marcas: Marca[]; passoMs: number }) {
+export default function Velas({ velas, t, medio, alvo, marcas, passoMs }: { velas: Vela[]; t: Tema; medio: number | null; alvo?: number | null; marcas: Marca[]; passoMs: number }) {
   const [largura, setLargura] = useState(0);
   if (!velas.length) return <View style={{ height: ALTURA }} />;
 
@@ -25,6 +25,7 @@ export default function Velas({ velas, t, medio, marcas, passoMs }: { velas: Vel
   let min = Math.min(...velas.map((v) => v.l));
   let max = Math.max(...velas.map((v) => v.h));
   if (medio != null && medio > 0) { min = Math.min(min, medio); max = Math.max(max, medio); }
+  if (alvo != null && alvo > 0) { min = Math.min(min, alvo); max = Math.max(max, alvo); }
   const folga = (max - min) * 0.08 || max * 0.01;
   min -= folga; max += folga;
   const y = (p: number) => ((max - p) / (max - min)) * ALTURA;
@@ -80,6 +81,12 @@ export default function Velas({ velas, t, medio, marcas, passoMs }: { velas: Vel
               {etiqueta(medio, t.acento)}
             </G>
           )}
+          {alvo != null && alvo > 0 && (
+            <G>
+              <Line x1={0} x2={W} y1={y(alvo)} y2={y(alvo)} stroke={t.alta} strokeWidth={1.5} strokeDasharray="6 4" />
+              {etiqueta(alvo, t.alta)}
+            </G>
+          )}
           <Line x1={0} x2={W} y1={y(ultimo)} y2={y(ultimo)} stroke={corUlt} strokeWidth={1} strokeDasharray="2 3" />
           {etiqueta(ultimo, corUlt)}
           {marcas.map((m, k) => {
@@ -115,6 +122,7 @@ export function LegendaVelas({ t, temPosicao }: { t: Tema; temPosicao: boolean }
   return (
     <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 14 }}>
       {temPosicao && item(t.acento, "Seu preço de compra", true)}
+      {temPosicao && item(t.alta, "Alvo de venda (+2,9%)", true)}
       {item(t.alta, "Compra", false, "up")}
       {item(t.baixa, "Venda", false, "down")}
     </View>

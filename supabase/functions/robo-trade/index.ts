@@ -12,7 +12,54 @@ async function atualizarContaReal() {
   if (!dados && !erro) return null; // chave de leitura ainda não colocada
   if (dados) await avisarOperacoesReais(dados).catch(() => {});
   await db("robo_conta_real", { method: "POST", body: JSON.stringify({ id: 1, ...(dados ?? {}), erro, atualizado_em: new Date().toISOString() }), headers: { Prefer: "return=minimal,resolution=merge-duplicates" } });
+  if (dados) {
+    await guardarSaldo(dados).catch(() => {});
+    await avisarPoucoLivre(dados).catch(() => {});
+  }
   return dados ?? { erro };
+}
+
+// Foto do saldo a cada 10 minutos, para o gráfico do saldo no app
+async function guardarSaldo(dados: NonNullable<Awaited<ReturnType<typeof lerContaReal>>>) {
+  const ult = await db("robo_saldo_hist?select=em&order=em.desc&limit=1");
+  if (ult?.[0] && Date.now() - new Date(ult[0].em).getTime() < 10 * 60_000) return;
+  await db("robo_saldo_hist", { method: "POST", body: JSON.stringify({ em: new Date().toISOString(), total_usdt: dados.total_usdt, total_brl: dados.total_brl }), headers: { Prefer: "return=minimal" } });
+}
+
+// Cada compra dos bots usa 5,5 USDT. Avisa uma vez quando o USDT livre não dá nem pra uma compra.
+const POR_COMPRA = 5.5;
+async function avisarPoucoLivre(dados: NonNullable<Awaited<ReturnType<typeof lerContaReal>>>) {
+  const livre = dados.moedas.find((m) => m.moeda === "USDT")?.qtd ?? 0;
+  const cfg = await db("robo_config?chave=eq.aviso_livre&select=valor");
+  const jaAvisou = cfg?.[0]?.valor === "1";
+  const falta = livre < POR_COMPRA;
+  if (falta && !jaAvisou) {
+    await enviarPush("Pouco dinheiro livre", `Você tem só ${livre.toLocaleString("pt-BR", { maximumFractionDigits: 2 })} USDT livres. Cada compra dos bots precisa de ${POR_COMPRA.toLocaleString("pt-BR")} USDT, então eles não conseguem comprar agora.`).catch(() => {});
+  }
+  if (falta !== jaAvisou) {
+    await db("robo_config", { method: "POST", body: JSON.stringify({ chave: "aviso_livre", valor: falta ? "1" : "0" }), headers: { Prefer: "return=minimal,resolution=merge-duplicates" } });
+  }
+}
+
+// Resumo do dia (roda às 21h de Brasília)
+async function resumoDoDia() {
+  const ant = await db("robo_conta_real?id=eq.1&select=operacoes,total_brl,usdt_brl");
+  const c = ant?.[0];
+  if (!c) return null;
+  const inicio = new Date(Date.now() - 3 * 3600_000);
+  inicio.setUTCHours(0, 0, 0, 0);
+  const desde = inicio.getTime() + 3 * 3600_000;
+  const hoje = (c.operacoes ?? []).filter((o: any) => Number(o.em) >= desde);
+  const compras = hoje.filter((o: any) => o.tipo === "compra").length;
+  const vendas = hoje.filter((o: any) => o.tipo === "venda");
+  const lucro = vendas.reduce((a: number, o: any) => a + (Number(o.lucro_usdt) || 0), 0) * Number(c.usdt_brl || 0);
+  const reais = (v: number) => v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+  const plural = (n: number, s: string, p: string) => `${n} ${n === 1 ? s : p}`;
+  const msg = `Hoje: ${plural(compras, "compra", "compras")}, ${plural(vendas.length, "venda", "vendas")}` +
+    (vendas.length ? `, ${lucro >= 0 ? "lucro" : "prejuízo"} de ${reais(Math.abs(lucro))}` : "") +
+    `. Saldo: ${reais(Number(c.total_brl || 0))}.`;
+  await enviarPush("Resumo do dia", msg).catch(() => {});
+  return msg;
 }
 
 const URL_SB = Deno.env.get("SUPABASE_URL")!;
@@ -508,6 +555,7 @@ Deno.serve(async (req) => {
       }
       return json({ ok: true, resultado: out });
     }
+    if (acao === "resumo_dia") return json({ ok: true, resumo: await resumoDoDia() });
     if (acao === "testar_push") {
       return json({ ok: true, ...(await enviarPush("PanissAsset", "Teste: os avisos de compra e venda vão chegar aqui.")) });
     }

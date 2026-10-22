@@ -115,6 +115,12 @@ export type OperacaoReal = {
   qtd: number; preco_usdt: number; valor_usdt: number; lucro_usdt: number | null; lucro_pct: number | null;
 };
 
+// Histórico do saldo (uma foto a cada 10 minutos)
+export async function buscarSaldoHist(desde: number) {
+  const l = await ler<{ em: string; total_usdt: string; total_brl: string }[]>(`robo_saldo_hist?select=em,total_usdt,total_brl&em=gte.${new Date(desde).toISOString()}&order=em`);
+  return l.map((x) => ({ t: new Date(x.em).getTime(), usdt: Number(x.total_usdt), brl: Number(x.total_brl) }));
+}
+
 // Velas (candles) com o preço real da Binance (dados públicos)
 export async function buscarVelas(par: string, intervalo: string, limite = 80) {
   for (const base of ["https://data-api.binance.vision", "https://api.binance.com"]) {

@@ -343,3 +343,24 @@ export function backtestDCA(candles: Candle[], cfg: ConfigDCA, saldo = 1000) {
     mensal,
   };
 }
+
+// ---------- RSI na entrada + lucro fixo / stop na saída (como o bot da WunderTrading) ----------
+export function backtestRsiAlvo(candles: Candle[], alvo: number, stop: number, saldo = 1000) {
+  const fech = candles.map((k) => k.c);
+  const x = rsi(fech, 14);
+  let caixa = saldo, qtd = 0, custo = 0, preco = 0, ops = 0, acertos = 0, pico = saldo, maiorQueda = 0;
+  for (let i = 0; i < fech.length; i++) {
+    const p = fech[i];
+    if (qtd === 0) {
+      if (x[i] != null && (x[i] as number) < 30) { custo = caixa; preco = p; qtd = (caixa * (1 - TAXA)) / p; caixa = 0; }
+    } else if (p >= preco * (1 + alvo / 100) || (stop > 0 && p <= preco * (1 - stop / 100))) {
+      caixa = qtd * p * (1 - TAXA); qtd = 0; ops++;
+      if (caixa > custo) acertos++;
+    }
+    const pat = caixa + qtd * p;
+    if (pat > pico) pico = pat;
+    maiorQueda = Math.max(maiorQueda, (1 - pat / pico) * 100);
+  }
+  const final = caixa + qtd * fech[fech.length - 1];
+  return { alvo, stop, resultado_pct: round((final / saldo - 1) * 100), operacoes: ops, acertos_pct: ops ? round((acertos / ops) * 100) : 0, maior_queda_pct: round(maiorQueda) };
+}

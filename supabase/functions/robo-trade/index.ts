@@ -1,7 +1,7 @@
 // Robô Trade — roda na nuvem (Supabase) a cada 5 minutos.
 // Lê o histórico de preços da Binance (dados públicos) e decide compra/venda.
 // Carteiras "simulado" só anotam; carteiras "testnet" mandam ordens na Binance Testnet.
-import { backtest, backtestBanca, backtestDCA, calcularSinais, Candle, Estrategia, ESTRATEGIAS, motivo, TAXA } from "./logica.ts";
+import { backtest, backtestBanca, backtestDCA, backtestRsiAlvo, calcularSinais, Candle, Estrategia, ESTRATEGIAS, motivo, TAXA } from "./logica.ts";
 import { comprar, temChaves, testarConta, vender } from "./binance.ts";
 
 const URL_SB = Deno.env.get("SUPABASE_URL")!;
@@ -370,6 +370,19 @@ Deno.serve(async (req) => {
       for (const p of pares) {
         const { fechados } = await candles(p, "1h", Math.ceil(dias * 24) + 50);
         out[p] = configs.map((cfg) => backtestDCA(fechados, cfg));
+      }
+      return json({ ok: true, resultado: out });
+    }
+    if (acao === "backtest_alvo") {
+      const pares = ["SOLUSDT", "ETHUSDT", "BTCUSDT", "BNBUSDT"];
+      const out: Record<string, unknown> = {};
+      for (const p of pares) {
+        const { fechados } = await candles(p, "1h", 184 * 24 + 50);
+        const linhas: unknown[] = [];
+        for (const alvo of [2, 3, 5, 8, 10]) for (const stop of [0, 10]) linhas.push(backtestRsiAlvo(fechados, alvo, stop));
+        const nosso = backtest(fechados, "rsi");
+        linhas.push({ alvo: "RSI>70", stop: 0, resultado_pct: nosso.resultado_pct, operacoes: nosso.operacoes, acertos_pct: nosso.acertos_pct, maior_queda_pct: nosso.maior_queda_pct });
+        out[p] = linhas;
       }
       return json({ ok: true, resultado: out });
     }

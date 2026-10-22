@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { ActivityIndicator, AppState, Platform, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View, useWindowDimensions } from "react-native";
 import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
 import { StatusBar } from "expo-status-bar";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import Svg, { Path, Rect } from "react-native-svg";
 import {
   ehBanca, valorAtual, buscarCarteiras, buscarOperacoes, buscarTeste, Carteira, data, dataHora, dinheiro, Estrategia, MOEDAS,
@@ -34,6 +35,17 @@ function Tela() {
   const largo = width >= 900;
   const [aba, setAba] = useState<Aba>("agora");
   const [atualizacao, setAtualizacao] = useState<Atualizacao | null>(null);
+  const [oculto, setOculto] = useState(false);
+
+  // Lembra se o saldo estava escondido
+  useEffect(() => {
+    AsyncStorage.getItem("saldo_oculto").then((v) => setOculto(v === "1")).catch(() => {});
+  }, []);
+  const alternarOculto = () => {
+    const novo = !oculto;
+    setOculto(novo);
+    AsyncStorage.setItem("saldo_oculto", novo ? "1" : "0").catch(() => {});
+  };
 
   // Procura versão nova ao abrir, ao voltar para o app e a cada 30 minutos
   useEffect(() => {
@@ -55,6 +67,9 @@ function Tela() {
             <Text style={s.titulo}>PanissAsset</Text>
             <Text style={s.legenda}>Roda sozinho na nuvem a cada 5 minutos</Text>
           </View>
+          <Pressable onPress={alternarOculto} hitSlop={10} style={s.olho} accessibilityLabel={oculto ? "Mostrar saldo" : "Esconder saldo"}>
+            <Olho t={t} fechado={oculto} />
+          </Pressable>
           <View style={[s.selo, { borderColor: t.alta }]}>
             <View style={[s.ponto, { backgroundColor: t.alta }]} />
             <Text style={[s.seloTexto, { color: t.alta }]}>Real</Text>
@@ -79,13 +94,13 @@ function Tela() {
           ))}
         </View>
       </View>
-      {aba === "agora" ? <Agora t={t} s={s} largo={largo} /> : <Historico t={t} s={s} largo={largo} />}
+      {aba === "agora" ? <Agora t={t} s={s} largo={largo} oculto={oculto} /> : <Historico t={t} s={s} largo={largo} />}
     </SafeAreaView>
   );
 }
 
 // ---------------- Agora ----------------
-function Agora({ t, s, largo }: { t: Tema; s: Estilos; largo: boolean }) {
+function Agora({ t, s, oculto }: { t: Tema; s: Estilos; largo: boolean; oculto: boolean }) {
   const [carteiras, setCarteiras] = useState<Carteira[] | null>(null);
   const [ops, setOps] = useState<Operacao[]>([]);
   const [real, setReal] = useState<ContaReal | null>(null);
@@ -110,76 +125,82 @@ function Agora({ t, s, largo }: { t: Tema; s: Estilos; largo: boolean }) {
     return () => clearInterval(id);
   }, [carregar]);
 
-  const testnet = (carteiras ?? []).filter((c) => c.modo !== "simulado");
-  const totalInicial = testnet.reduce((a, c) => a + c.saldo_inicial, 0);
-  const totalAgora = testnet.reduce((a, c) => a + valorAtual(c), 0);
-  const totalPct = totalInicial ? (totalAgora / totalInicial - 1) * 100 : null;
-  const atualizado = carteiras?.length ? carteiras.map((c) => c.atualizado_em).sort().pop()! : null;
+  const banca = (carteiras ?? []).find((c) => ehBanca(c));
 
   return (
     <ScrollView contentContainerStyle={s.rolagem} refreshControl={<RefreshControl refreshing={atualizando} onRefresh={carregar} tintColor={t.acento} />}>
       <View style={s.conteudo}>
         {erro && <Aviso t={t} s={s} texto={erro} />}
         {!carteiras && !erro && <ActivityIndicator color={t.acento} style={{ marginTop: 40 }} />}
-        {real && <ContaRealCard r={real} t={t} s={s} />}
-        {carteiras && (
-          <>
-            <View style={s.precoLinha}>
-              <View>
-                <Text style={s.rotulo}>Saldo na Testnet</Text>
-                <Text style={s.precoGrande}>{dinheiro(totalAgora)}</Text>
-                <Text style={[s.textoNormal, { color: corDoNumero(t, totalPct == null ? null : Math.round(totalPct * 10) / 10) }]}>
-                  {pct(totalPct)} sobre {dinheiro(totalInicial)}
-                </Text>
-              </View>
-              <View style={{ alignItems: "flex-end" }}>
-                <Text style={s.rotulo}>Atualizado</Text>
-                <Text style={s.textoSuave}>{atualizado ? dataHora(atualizado) : "-"}</Text>
-                {Platform.OS === "web" && (
-                  <Pressable onPress={carregar} style={s.botaoPequeno}>
-                    <Text style={s.botaoPequenoTexto}>Atualizar</Text>
-                  </Pressable>
-                )}
-              </View>
-            </View>
-            <View style={[s.grade, largo && { flexDirection: "row", flexWrap: "wrap" }]}>
-              {ordenar(carteiras).map((c) =>
-                ehBanca(c) ? (
-                  <BancaCard key={c.id} c={c} t={t} s={s} ops={ops.filter((o) => o.carteira === c.id)} />
-                ) : (
-                  <CarteiraCard key={c.id} c={c} t={t} s={s} ops={ops.filter((o) => o.carteira === c.id)} />
-                )
-              )}
-            </View>
-            <Text style={s.secao}>Últimas operações</Text>
-            <View style={s.painel}>
-              {ops.length === 0 ? (
-                <Text style={s.textoSuave}>
-                  Nenhuma operação ainda. O robô começou agora e só compra quando aparecer um sinal. Na vela de 1 hora isso pode levar algumas horas ou dias.
-                </Text>
-              ) : (
-                ops.map((o, i) => <LinhaOperacao key={o.id} o={o} t={t} s={s} ultima={i === ops.length - 1} />)
-              )}
-            </View>
-            <Text style={s.rodape}>
-              Testnet: ordens de verdade na Binance de teste, com dinheiro de mentira. Nada vai para a sua conta real.
-            </Text>
-          </>
+        {real && <ContaRealCard r={real} t={t} s={s} oculto={oculto} />}
+        {Platform.OS === "web" && (
+          <Pressable onPress={carregar} style={[s.botaoPequeno, { alignSelf: "flex-end", marginBottom: 12 }]}>
+            <Text style={s.botaoPequenoTexto}>Atualizar</Text>
+          </Pressable>
         )}
+        {banca && <SinaisCard c={banca} t={t} s={s} />}
       </View>
     </ScrollView>
   );
 }
 
+// RSI de cada moeda agora (o mesmo sinal que os bots usam)
+function SinaisCard({ c, t, s }: { c: Carteira; t: Tema; s: Estilos }) {
+  const ind = (c.indicadores ?? {}) as any;
+  const precos: Record<string, number> = ind.precos ?? {};
+  const rsis: Record<string, number | null> = ind.rsi ?? {};
+  const pares = ordenarPares(c.par.split(","));
+  return (
+    <View style={[s.painel, s.cartao]}>
+      <View style={s.linhaEntre}>
+        <Text style={s.cartaoTitulo}>Sinais agora</Text>
+        <Text style={s.textoSuave}>{dataHora(c.atualizado_em)}</Text>
+      </View>
+      <Text style={s.textoSuave}>RSI 14 · vela de 1 hora</Text>
+      <View style={{ gap: 10 }}>
+        {pares.map((p) => {
+          const r = rsis[p];
+          const sinal = r == null ? "-" : r < 30 ? "Sinal de compra" : r > 70 ? "Sinal de venda" : "Sem sinal";
+          const cor = r == null ? t.suave : r < 30 ? t.alta : r > 70 ? t.baixa : t.suave;
+          return (
+            <View key={p} style={[s.indicador, { gap: 6 }]}>
+              <View style={s.linhaEntre}>
+                <Text style={[s.textoNormal, { fontWeight: "700" }]}>{nomeMoeda(p)}</Text>
+                <Text style={s.textoNormal}>{dinheiro(precos[p])}</Text>
+              </View>
+              <View style={s.linhaEntre}>
+                <Text style={s.textoSuave}>RSI {numero(r, 1)}</Text>
+                <Text style={[s.textoSuave, { color: cor, fontWeight: "700" }]}>{sinal}</Text>
+              </View>
+              <View style={s.barra}>
+                <View style={[s.barraZona, { left: 0, width: "30%", backgroundColor: t.altaFraca }]} />
+                <View style={[s.barraZona, { left: "70%", width: "30%", backgroundColor: t.baixaFraca }]} />
+                {r != null && <View style={[s.barraMarca, { left: `${Math.max(0, Math.min(100, r))}%`, backgroundColor: t.acento }]} />}
+              </View>
+            </View>
+          );
+        })}
+      </View>
+      <Text style={s.regra}>Abaixo de 30 os bots compram. Vendem com 2,9% de lucro.</Text>
+    </View>
+  );
+}
+
+function ordenarPares(l: string[]) {
+  const ordem = ["SOLUSDT", "ETHUSDT", "BNBUSDT", "BTCUSDT"];
+  return [...l].sort((a, b) => ordem.indexOf(a) - ordem.indexOf(b));
+}
+
 // Conta real da Binance: só mostra (o app e o robô não mexem nela)
-function ContaRealCard({ r, t, s }: { r: ContaReal; t: Tema; s: Estilos }) {
+function ContaRealCard({ r, t, s, oculto }: { r: ContaReal; t: Tema; s: Estilos; oculto: boolean }) {
+  const x = (v: string) => (oculto ? "••••" : v);
   return (
     <View style={[s.painel, s.cartao, { marginBottom: 16 }]}>
       <View style={s.linhaEntre}>
         <View style={{ flex: 1 }}>
           <Text style={s.rotulo}>Real - Binance</Text>
-          <Text style={s.precoGrande}>{reais(r.total_brl)}</Text>
-          <Text style={s.textoSuave}>{dinheiro(r.total_usdt)}</Text>
+          <Text style={s.precoGrande}>{oculto ? "R$ ••••••" : reais(r.total_brl)}</Text>
+          <Text style={s.textoSuave}>{x(dinheiro(r.total_usdt))}</Text>
         </View>
         <View style={{ alignItems: "flex-end" }}>
           <Text style={s.rotulo}>Atualizado</Text>
@@ -194,10 +215,10 @@ function ContaRealCard({ r, t, s }: { r: ContaReal; t: Tema; s: Estilos }) {
         r.moedas.map((m) => (
           <View key={m.moeda} style={s.linhaEntre}>
             <Text style={s.textoNormal}>
-              {nomeMoeda(m.moeda + "USDT")} <Text style={s.textoSuave}>{m.qtd.toLocaleString("pt-BR", { maximumFractionDigits: 8 })}</Text>
+              {nomeMoeda(m.moeda + "USDT")} <Text style={s.textoSuave}>{x(m.qtd.toLocaleString("pt-BR", { maximumFractionDigits: 8 }))}</Text>
             </Text>
             <Text style={s.textoNormal}>
-              {reais(r.usdt_brl ? m.usdt * r.usdt_brl : null)} <Text style={s.textoSuave}>· {dinheiro(m.usdt)}</Text>
+              {x(reais(r.usdt_brl ? m.usdt * r.usdt_brl : null))} <Text style={s.textoSuave}>· {x(dinheiro(m.usdt))}</Text>
             </Text>
           </View>
         ))
@@ -640,6 +661,16 @@ function Aviso({ t, s, texto }: { t: Tema; s: Estilos; texto: string }) {
   );
 }
 
+function Olho({ t, fechado }: { t: Tema; fechado: boolean }) {
+  return (
+    <Svg width={22} height={22} viewBox="0 0 24 24" fill="none">
+      <Path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12Z" stroke={t.suave} strokeWidth={2} strokeLinejoin="round" />
+      <Path d="M12 9a3 3 0 1 1 0 6 3 3 0 0 1 0-6Z" fill={t.suave} />
+      {fechado && <Path d="M3 3l18 18" stroke={t.suave} strokeWidth={2.2} strokeLinecap="round" />}
+    </Svg>
+  );
+}
+
 function Logo({ t }: { t: Tema }) {
   // Duas velas retas quase coladas formando um "P": a verde é a haste, a vermelha é a barriga
   return (
@@ -661,6 +692,7 @@ function estilos(t: Tema) {
     cabecalho: { flexDirection: "row", alignItems: "center", gap: 12, paddingTop: 12, paddingBottom: 14 },
     titulo: { color: t.texto, fontSize: 22, fontWeight: "800", letterSpacing: -0.3 },
     legenda: { color: t.suave, fontSize: 12.5, marginTop: 1 },
+    olho: { padding: 6 },
     selo: { flexDirection: "row", alignItems: "center", gap: 6, borderWidth: 1, borderColor: t.acento, borderRadius: 99, paddingHorizontal: 10, paddingVertical: 5 },
     seloTexto: { fontSize: 12, fontWeight: "700", letterSpacing: 0.4, textTransform: "uppercase" },
     ponto: { width: 7, height: 7, borderRadius: 4 },

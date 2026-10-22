@@ -1,0 +1,347 @@
+<title>Simulador PanissAsset</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600&family=Barlow+Condensed:wght@500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap">
+<style>
+/* Layout: painel de controles no topo (quebra em coluna no celular), resumo em números, gráfico mensal e tabela por moeda. Visual escuro de terminal de trade. */
+:root {
+  --bg: #0b0e13;
+  --painel: #121720;
+  --painel2: #182030;
+  --linha: #232c3b;
+  --texto: #e6ebf2;
+  --suave: #8794a8;
+  --acento: #4fb3ff;
+  --alta: #2ecc8a;
+  --baixa: #ff5a6a;
+  --aviso: #f0b44c;
+  --f-titulo: "Barlow Condensed", "Arial Narrow", system-ui, sans-serif;
+  --f-texto: "Barlow", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --f-num: "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body {
+  background: var(--bg); color: var(--texto); font-family: var(--f-texto); font-size: 15px; line-height: 1.45;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 20px 40px;
+}
+.pagina { max-width: 1120px; margin: 0 auto; display: flex; flex-direction: column; gap: 18px; }
+header { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.logo { width: 30px; height: 30px; flex: none; }
+h1 { font-family: var(--f-titulo); font-weight: 700; font-size: 28px; letter-spacing: .3px; margin: 0; line-height: 1; }
+.sub { color: var(--suave); font-size: 13.5px; margin: 0; flex-basis: 100%; }
+h2 { font-family: var(--f-titulo); font-weight: 600; font-size: 19px; margin: 0; letter-spacing: .3px; text-wrap: balance; }
+.rotulo { font-size: 11.5px; text-transform: uppercase; letter-spacing: 1px; color: var(--suave); font-weight: 600; }
+
+.controles { background: var(--painel); border: 1px solid var(--linha); border-radius: 12px; padding: 16px; display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 16px 22px; }
+.campo { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip { font: 600 13.5px var(--f-texto); color: var(--suave); background: var(--painel2); border: 1px solid var(--linha); border-radius: 8px; padding: 7px 11px; cursor: pointer; }
+.chip[aria-pressed="true"] { color: var(--bg); background: var(--acento); border-color: var(--acento); }
+.chip:focus-visible, input:focus-visible { outline: 2px solid var(--acento); outline-offset: 2px; }
+.linha-num { display: flex; align-items: center; gap: 10px; }
+input[type=range] { flex: 1; min-width: 0; accent-color: var(--acento); }
+input[type=number] { width: 78px; font: 500 14px var(--f-num); color: var(--texto); background: var(--painel2); border: 1px solid var(--linha); border-radius: 8px; padding: 6px 8px; }
+.unid { color: var(--suave); font: 13px var(--f-num); }
+.dica { color: var(--suave); font-size: 12.5px; }
+.desligado { opacity: .4; pointer-events: none; }
+
+.estado { color: var(--suave); font-size: 13.5px; min-height: 20px; }
+.resumo { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px; }
+.num { background: var(--painel); border: 1px solid var(--linha); border-radius: 12px; padding: 14px; display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.num .v { font: 600 24px var(--f-num); font-variant-numeric: tabular-nums; letter-spacing: -.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.num .d { color: var(--suave); font-size: 12.5px; }
+.pos { color: var(--alta); } .neg { color: var(--baixa); } .avi { color: var(--aviso); }
+
+.bloco { background: var(--painel); border: 1px solid var(--linha); border-radius: 12px; padding: 16px; display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.cab { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+#grafico { width: 100%; height: 230px; display: block; }
+.rolar { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; font-size: 14px; min-width: 640px; }
+th { text-align: right; font: 600 11.5px var(--f-texto); text-transform: uppercase; letter-spacing: .8px; color: var(--suave); padding: 8px 10px; border-bottom: 1px solid var(--linha); white-space: nowrap; }
+td { text-align: right; padding: 10px; border-bottom: 1px solid var(--linha); font-family: var(--f-num); font-variant-numeric: tabular-nums; white-space: nowrap; }
+th:first-child, td:first-child { text-align: left; }
+td:first-child { font: 600 14px var(--f-texto); }
+tfoot td { border-bottom: none; font-weight: 600; }
+.nota { color: var(--suave); font-size: 12.5px; max-width: 75ch; margin: 0; }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+
+<div class="pagina">
+  <header>
+    <svg class="logo" viewBox="0 0 30 30" aria-hidden="true"><rect x="6" y="5" width="8" height="20" rx="1" fill="var(--alta)"/><rect x="15" y="5" width="8" height="10" rx="1" fill="var(--baixa)"/></svg>
+    <h1>Simulador PanissAsset</h1>
+    <p class="sub">Teste a regra dos robôs no histórico real da Binance. Compra quando o RSI 14 cai abaixo do valor escolhido e vende no alvo de lucro. Taxa de 0,1% em cada compra e venda já descontada.</p>
+  </header>
+
+  <section class="controles" aria-label="Regras da simulação">
+    <div class="campo">
+      <span class="rotulo">Gráfico</span>
+      <div class="chips" id="c-tempo">
+        <button class="chip" data-v="15m">15 min</button><button class="chip" data-v="1h">1 hora</button><button class="chip" data-v="4h">4 horas</button><button class="chip" data-v="1d">1 dia</button>
+      </div>
+    </div>
+    <div class="campo">
+      <span class="rotulo">Período</span>
+      <div class="chips" id="c-periodo">
+        <button class="chip" data-v="30">1 mês</button><button class="chip" data-v="90">3 meses</button><button class="chip" data-v="182">6 meses</button><button class="chip" data-v="365">1 ano</button>
+      </div>
+    </div>
+    <div class="campo">
+      <span class="rotulo">Moedas</span>
+      <div class="chips" id="c-moedas">
+        <button class="chip" data-v="BTCUSDT">BTC</button><button class="chip" data-v="ETHUSDT">ETH</button><button class="chip" data-v="SOLUSDT">SOL</button><button class="chip" data-v="BNBUSDT">BNB</button><button class="chip" data-v="DOGEUSDT">DOGE</button><button class="chip" data-v="PEPEUSDT">PEPE</button><button class="chip" data-v="SHIBUSDT">SHIB</button><button class="chip" data-v="ADAUSDT">ADA</button><button class="chip" data-v="LINKUSDT">LINK</button><button class="chip" data-v="LTCUSDT">LTC</button>
+      </div>
+    </div>
+    <div class="campo">
+      <label class="rotulo" for="alvo">Lucro alvo</label>
+      <div class="linha-num"><input type="range" id="alvo-r" min="0.5" max="10" step="0.1" aria-label="Lucro alvo"><input type="number" id="alvo" min="0.3" max="50" step="0.1"><span class="unid">%</span></div>
+    </div>
+    <div class="campo">
+      <span class="rotulo">Stop loss</span>
+      <div class="chips" id="c-stop"><button class="chip" data-v="0">Sem stop</button><button class="chip" data-v="1">Com stop</button></div>
+      <div class="linha-num" id="stop-linha"><input type="range" id="stop-r" min="1" max="50" step="1" aria-label="Stop loss"><input type="number" id="stop" min="0.5" max="90" step="0.5"><span class="unid">%</span></div>
+    </div>
+    <div class="campo">
+      <span class="rotulo">Regra das compras</span>
+      <div class="chips" id="c-regra"><button class="chip" data-v="uma">1 compra por vez</button><button class="chip" data-v="lotes">Várias compras</button></div>
+      <div class="linha-num" id="lotes-linha"><label class="dica" for="maxl">Máximo por moeda</label><input type="number" id="maxl" min="0" max="500" step="1"><span class="unid" id="maxl-txt">0 = sem limite</span></div>
+    </div>
+    <div class="campo">
+      <label class="rotulo" for="rsi">Compra com RSI abaixo de</label>
+      <div class="linha-num"><input type="range" id="rsi-r" min="10" max="50" step="1" aria-label="RSI de compra"><input type="number" id="rsi" min="5" max="60" step="1"></div>
+    </div>
+    <div class="campo">
+      <label class="rotulo" for="valor">Valor de cada compra</label>
+      <div class="linha-num"><input type="number" id="valor" min="5" max="10000" step="0.5"><span class="unid">USDT</span></div>
+    </div>
+  </section>
+
+  <div class="estado" id="estado" role="status">Carregando o histórico de preços...</div>
+
+  <section class="resumo" id="resumo" aria-label="Resumo"></section>
+
+  <section class="bloco">
+    <div class="cab"><h2>Lucro realizado por mês</h2><span class="dica" id="g-legenda"></span></div>
+    <svg id="grafico" role="img" aria-label="Lucro realizado por mês"></svg>
+  </section>
+
+  <section class="bloco">
+    <h2>Por moeda</h2>
+    <div class="rolar"><table id="tabela"></table></div>
+  </section>
+
+  <p class="nota" id="nota"></p>
+</div>
+
+<script>
+const NOMES = { BTCUSDT: "BTC", ETHUSDT: "ETH", SOLUSDT: "SOL", BNBUSDT: "BNB", DOGEUSDT: "DOGE", PEPEUSDT: "PEPE", SHIBUSDT: "SHIB", ADAUSDT: "ADA", LINKUSDT: "LINK", LTCUSDT: "LTC" };
+const TAXA = 0.001;
+const MESES = ["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"];
+
+const st = { tempo: "1h", periodo: 365, moedas: ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT"], alvo: 2.9, comStop: true, stop: 15, regra: "uma", maxl: 0, rsi: 30, valor: 5.5 };
+try { Object.assign(st, JSON.parse(localStorage.getItem("simulador") || "{}")); } catch (e) {}
+
+const cache = {};
+async function carregar(par, tempo) {
+  const k = par + "_" + tempo;
+  if (!cache[k]) cache[k] = fetch("dados/" + k + ".json").then((r) => { if (!r.ok) throw new Error(r.status); return r.json(); });
+  return cache[k];
+}
+
+function rsi(c, n) {
+  const o = new Float64Array(c.length).fill(NaN);
+  if (c.length <= n) return o;
+  let g = 0, l = 0;
+  for (let i = 1; i <= n; i++) { const d = c[i] - c[i - 1]; if (d > 0) g += d; else l -= d; }
+  g /= n; l /= n;
+  o[n] = l === 0 ? 100 : 100 - 100 / (1 + g / l);
+  for (let i = n + 1; i < c.length; i++) {
+    const d = c[i] - c[i - 1];
+    g = (g * (n - 1) + (d > 0 ? d : 0)) / n; l = (l * (n - 1) + (d < 0 ? -d : 0)) / n;
+    o[i] = l === 0 ? 100 : 100 - 100 / (1 + g / l);
+  }
+  return o;
+}
+
+const mesDe = (t) => { const d = new Date(t - 3 * 3600000); return d.getUTCFullYear() + "-" + String(d.getUTCMonth() + 1).padStart(2, "0"); };
+const liquido = (compra, venda) => (venda * (1 - TAXA)) / (compra / (1 - TAXA)) - 1;
+
+// Uma moeda. Retorna resultados e marca o dinheiro preso em cada vela.
+function simular(d, inicio, preso) {
+  const { c, h, l } = d, passo = d.passo, t0 = d.t0;
+  const x = rsi(c, 14);
+  const alvo = st.alvo / 100, stop = st.comStop ? st.stop / 100 : 0;
+  const lotes = st.regra === "lotes", maxl = lotes ? (st.maxl > 0 ? st.maxl : Infinity) : 1;
+  let abertos = [];
+  const r = { compras: 0, vendas: 0, alvos: 0, stops: 0, lucro: 0, porMes: {}, maxPreso: 0, maisLongo: 0, inicioPreco: null, fimPreco: c[c.length - 1] };
+  for (let i = 15; i < c.length; i++) {
+    const t = t0 + d.t[i] * passo;
+    if (t < inicio) continue;
+    if (r.inicioPreco == null) r.inicioPreco = c[i - 1];
+    // 1) vendas das posições abertas (stop tem prioridade se as duas coisas acontecem na mesma vela)
+    if (abertos.length) {
+      const ficam = [];
+      for (const p of abertos) {
+        let saida = 0, tipo = "";
+        if (stop > 0 && l[i] <= p.preco * (1 - stop)) { saida = p.preco * (1 - stop); tipo = "stop"; }
+        else if (h[i] >= p.preco * (1 + alvo)) { saida = p.preco * (1 + alvo); tipo = "alvo"; }
+        if (saida) {
+          const lucro = st.valor * liquido(p.preco, saida);
+          r.lucro += lucro; r.vendas++; r[tipo + "s"]++;
+          const m = (r.porMes[mesDe(t)] ??= { lucro: 0, vendas: 0, stops: 0 });
+          m.lucro += lucro; m.vendas++; if (tipo === "stop") m.stops++;
+          r.maisLongo = Math.max(r.maisLongo, t - p.t);
+        } else ficam.push(p);
+      }
+      abertos = ficam;
+    }
+    // 2) compra no fechamento da vela
+    const v = x[i];
+    if (!isNaN(v) && v < st.rsi && abertos.length < maxl) {
+      // várias compras: só quando o RSI ENTRA na zona (não a cada vela que continua lá)
+      const entrou = !lotes || !(x[i - 1] < st.rsi);
+      if (entrou) { abertos.push({ preco: c[i], t: t + passo }); r.compras++; }
+    }
+    const dinheiro = abertos.length * st.valor;
+    if (dinheiro > r.maxPreso) r.maxPreso = dinheiro;
+    preso.set(t, (preso.get(t) || 0) + dinheiro);
+  }
+  const ult = c[c.length - 1], tFim = t0 + d.t[c.length - 1] * passo;
+  r.abertos = abertos.length;
+  r.aberto = abertos.reduce((a, p) => a + st.valor * liquido(p.preco, ult), 0);
+  for (const p of abertos) r.maisLongo = Math.max(r.maisLongo, tFim - p.t);
+  r.segurar = r.inicioPreco ? (ult / r.inicioPreco - 1) * 100 : 0;
+  return r;
+}
+
+const $ = (id) => document.getElementById(id);
+const fmt = (n, casas = 2) => n.toLocaleString("pt-BR", { minimumFractionDigits: casas, maximumFractionDigits: casas });
+const sinal = (n, casas = 2) => (n > 0.004 ? "+" : n < -0.004 ? "−" : "") + fmt(Math.abs(n), casas);
+const classe = (n) => (n > 0.004 ? "pos" : n < -0.004 ? "neg" : "");
+
+let rodada = 0;
+async function rodar() {
+  try { localStorage.setItem("simulador", JSON.stringify(st)); } catch (e) {}
+  pintarControles();
+  const minha = ++rodada;
+  if (!st.moedas.length) { $("estado").textContent = "Escolha pelo menos uma moeda."; return; }
+  $("estado").textContent = "Carregando o histórico de preços...";
+  let dados;
+  try { dados = await Promise.all(st.moedas.map((p) => carregar(p, st.tempo))); }
+  catch (e) { $("estado").textContent = "Não consegui carregar o histórico de preços. Recarregue a página."; return; }
+  if (minha !== rodada) return;
+  const fim = Math.max(...dados.map((d) => d.t0 + d.t[d.t.length - 1] * d.passo));
+  const inicio = fim - st.periodo * 86400000;
+  const preso = new Map();
+  const res = dados.map((d, i) => ({ par: st.moedas[i], ...simular(d, inicio, preso) }));
+  let pico = 0, quando = 0;
+  for (const [t, v] of preso) if (v > pico) { pico = v; quando = t; }
+  const de = new Date(inicio), ate = new Date(fim);
+  $("estado").textContent = `De ${de.toLocaleDateString("pt-BR")} até ${ate.toLocaleDateString("pt-BR")} · gráfico de ${({ "15m": "15 minutos", "1h": "1 hora", "4h": "4 horas", "1d": "1 dia" })[st.tempo]}`;
+  mostrar(res, pico, quando, st.periodo);
+}
+
+function mostrar(res, pico, quando, dias) {
+  const soma = (k) => res.reduce((a, r) => a + r[k], 0);
+  const lucro = soma("lucro"), aberto = soma("aberto"), vendas = soma("vendas"), alvos = soma("alvos"), stops = soma("stops");
+  const meses = dias / 30.44;
+  const total = lucro + aberto;
+  const segurar = res.reduce((a, r) => a + r.segurar, 0) / res.length;
+  const pctBanca = pico > 0 ? (total / pico) * 100 : 0;
+  const tiles = [
+    ["Lucro realizado", `${sinal(lucro)}`, "USDT", classe(lucro), `${vendas} vendas · ${fmt(vendas / meses, 1)} por mês`],
+    ["Contando o que está aberto", `${sinal(total)}`, "USDT", classe(total), `${soma("abertos")} posição(ões) aberta(s): ${sinal(aberto)} USDT hoje`],
+    ["Dinheiro necessário", fmt(pico, 2), "USDT", "avi", pico ? `Pior momento: ${new Date(quando).toLocaleDateString("pt-BR")}` : "Nenhuma compra no período"],
+    ["Resultado sobre esse dinheiro", pico ? `${sinal(pctBanca, 1)}%` : "-", "", classe(pctBanca), `Só segurar as moedas: ${sinal(segurar, 1)}%`],
+    ["Acertos", vendas ? `${fmt((alvos / vendas) * 100, 0)}%` : "-", "", "", `${alvos} no alvo · ${stops} no stop`],
+  ];
+  $("resumo").innerHTML = tiles.map(([r, v, u, c, d]) => `<div class="num"><span class="rotulo">${r}</span><span class="v ${c}">${v}${u ? ` <span class="unid">${u}</span>` : ""}</span><span class="d">${d}</span></div>`).join("");
+
+  // tabela
+  const linhas = res.map((r) => `<tr><td>${NOMES[r.par]}</td><td>${r.compras}</td><td>${r.vendas}</td><td>${r.stops}</td><td class="${classe(r.lucro)}">${sinal(r.lucro)}</td><td>${r.abertos}</td><td class="${classe(r.aberto)}">${sinal(r.aberto)}</td><td>${fmt(r.maxPreso)}</td><td>${fmt(r.maisLongo / 86400000, 0)} d</td><td class="${classe(r.segurar)}">${sinal(r.segurar, 1)}%</td></tr>`).join("");
+  $("tabela").innerHTML = `<thead><tr><th>Moeda</th><th>Compras</th><th>Vendas</th><th>Stops</th><th>Lucro realizado</th><th>Abertas</th><th>Abertas hoje</th><th>Máx. preso</th><th>Maior espera</th><th>Só segurar</th></tr></thead><tbody>${linhas}</tbody>
+  <tfoot><tr><td>Total</td><td>${soma("compras")}</td><td>${vendas}</td><td>${stops}</td><td class="${classe(lucro)}">${sinal(lucro)}</td><td>${soma("abertos")}</td><td class="${classe(aberto)}">${sinal(aberto)}</td><td>${fmt(pico)}</td><td></td><td class="${classe(segurar)}">${sinal(segurar, 1)}%</td></tr></tfoot>`;
+
+  // gráfico mensal
+  const porMes = {};
+  for (const r of res) for (const [m, v] of Object.entries(r.porMes)) { const p = (porMes[m] ??= { lucro: 0, vendas: 0, stops: 0 }); p.lucro += v.lucro; p.vendas += v.vendas; p.stops += v.stops; }
+  desenhar(porMes);
+  $("g-legenda").textContent = "Valores em USDT, somando as moedas escolhidas";
+  $("nota").textContent = `Simulação com velas reais da Binance. Em "1 compra por vez" o robô compra quando o RSI está abaixo de ${st.rsi} no fechamento da vela e só volta a comprar depois de vender. Em "Várias compras" ele compra um novo lote cada vez que o RSI entra abaixo de ${st.rsi}, e cada lote vende sozinho no alvo. "Dinheiro necessário" é o máximo que ficou preso ao mesmo tempo somando as moedas. Se o alvo e o stop acontecem na mesma vela, conta como stop. Resultado passado não garante resultado futuro.`;
+}
+
+function desenhar(porMes) {
+  const svg = $("grafico");
+  const W = svg.clientWidth || 600, H = 230, E = 46, B = 26, T = 12;
+  const chaves = Object.keys(porMes).sort();
+  if (!chaves.length) { svg.innerHTML = `<text x="${W / 2}" y="${H / 2}" text-anchor="middle" fill="var(--suave)" font-size="13">Nenhuma venda no período</text>`; return; }
+  // preenche meses sem venda
+  const todos = [];
+  let [a, m] = chaves[0].split("-").map(Number); const [a2, m2] = chaves[chaves.length - 1].split("-").map(Number);
+  while (a < a2 || (a === a2 && m <= m2)) { todos.push(`${a}-${String(m).padStart(2, "0")}`); m++; if (m > 12) { m = 1; a++; } }
+  const vals = todos.map((k) => porMes[k]?.lucro ?? 0);
+  let max = Math.max(0, ...vals), min = Math.min(0, ...vals);
+  if (max === min) max = 1;
+  const pad = (max - min) * 0.1; max += max > 0 ? pad : 0; min -= min < 0 ? pad : 0;
+  const y = (v) => T + ((max - v) / (max - min)) * (H - T - B);
+  const larg = (W - E) / todos.length, barra = Math.max(3, larg * 0.62);
+  const passoGrade = escolherPasso((max - min) / 4);
+  let s = "";
+  for (let g = Math.ceil(min / passoGrade) * passoGrade; g <= max + 1e-9; g += passoGrade) {
+    s += `<line x1="${E}" x2="${W}" y1="${y(g)}" y2="${y(g)}" stroke="var(--linha)" stroke-width="1"/>`;
+    s += `<text x="${E - 8}" y="${y(g) + 4}" text-anchor="end" fill="var(--suave)" font-size="11" font-family="JetBrains Mono, monospace">${fmt(g, passoGrade < 1 ? 1 : 0)}</text>`;
+  }
+  s += `<line x1="${E}" x2="${W}" y1="${y(0)}" y2="${y(0)}" stroke="var(--suave)" stroke-width="1"/>`;
+  const cada = Math.ceil(todos.length / Math.max(1, Math.floor((W - E) / 42)));
+  todos.forEach((k, i) => {
+    const v = vals[i], x = E + i * larg + (larg - barra) / 2;
+    const y1 = y(Math.max(v, 0)), y2 = y(Math.min(v, 0));
+    const info = porMes[k];
+    s += `<rect x="${x}" y="${y1}" width="${barra}" height="${Math.max(1, y2 - y1)}" rx="2" fill="${v >= 0 ? "var(--alta)" : "var(--baixa)"}"><title>${MESES[+k.slice(5) - 1]}/${k.slice(2, 4)}: ${sinal(v)} USDT · ${info?.vendas ?? 0} vendas, ${info?.stops ?? 0} stops</title></rect>`;
+    if (i % cada === 0) s += `<text x="${x + barra / 2}" y="${H - 8}" text-anchor="middle" fill="var(--suave)" font-size="11">${MESES[+k.slice(5) - 1]}${k.slice(5) === "01" || i === 0 ? "/" + k.slice(2, 4) : ""}</text>`;
+  });
+  svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+  svg.innerHTML = s;
+}
+function escolherPasso(bruto) {
+  const p = Math.pow(10, Math.floor(Math.log10(bruto || 1)));
+  for (const f of [1, 2, 2.5, 5, 10]) if (f * p >= bruto) return f * p;
+  return 10 * p;
+}
+
+// ---------- controles ----------
+function pintarControles() {
+  for (const [id, chave] of [["c-tempo", "tempo"], ["c-periodo", "periodo"], ["c-regra", "regra"]])
+    for (const b of $(id).children) b.setAttribute("aria-pressed", String(b.dataset.v == st[chave]));
+  for (const b of $("c-moedas").children) b.setAttribute("aria-pressed", String(st.moedas.includes(b.dataset.v)));
+  for (const b of $("c-stop").children) b.setAttribute("aria-pressed", String((b.dataset.v === "1") === st.comStop));
+  $("stop-linha").classList.toggle("desligado", !st.comStop);
+  $("lotes-linha").classList.toggle("desligado", st.regra !== "lotes");
+  for (const [n, r] of [["alvo", "alvo-r"], ["stop", "stop-r"], ["rsi", "rsi-r"]]) {
+    if (document.activeElement !== $(n)) $(n).value = st[n];
+    $(r).value = st[n];
+  }
+  if (document.activeElement !== $("valor")) $("valor").value = st.valor;
+  if (document.activeElement !== $("maxl")) $("maxl").value = st.maxl;
+}
+let espera;
+const depois = () => { clearTimeout(espera); espera = setTimeout(rodar, 120); };
+for (const [id, chave, num] of [["c-tempo", "tempo"], ["c-periodo", "periodo", true], ["c-regra", "regra"]])
+  $(id).addEventListener("click", (e) => { const b = e.target.closest("button"); if (!b) return; st[chave] = num ? Number(b.dataset.v) : b.dataset.v; rodar(); });
+$("c-moedas").addEventListener("click", (e) => {
+  const b = e.target.closest("button"); if (!b) return;
+  st.moedas = st.moedas.includes(b.dataset.v) ? st.moedas.filter((m) => m !== b.dataset.v) : [...st.moedas, b.dataset.v].sort((a, c) => Object.keys(NOMES).indexOf(a) - Object.keys(NOMES).indexOf(c));
+  rodar();
+});
+$("c-stop").addEventListener("click", (e) => { const b = e.target.closest("button"); if (!b) return; st.comStop = b.dataset.v === "1"; rodar(); });
+for (const [n, r] of [["alvo", "alvo-r"], ["stop", "stop-r"], ["rsi", "rsi-r"]]) {
+  $(r).addEventListener("input", () => { st[n] = Number($(r).value); $(n).value = st[n]; depois(); });
+  $(n).addEventListener("input", () => { const v = Number($(n).value); if (v > 0) { st[n] = v; depois(); } });
+}
+$("valor").addEventListener("input", () => { const v = Number($("valor").value); if (v > 0) { st.valor = v; depois(); } });
+$("maxl").addEventListener("input", () => { const v = Math.max(0, Math.floor(Number($("maxl").value) || 0)); st.maxl = v; depois(); });
+window.addEventListener("resize", () => { clearTimeout(espera); espera = setTimeout(rodar, 200); });
+rodar();
+</script>

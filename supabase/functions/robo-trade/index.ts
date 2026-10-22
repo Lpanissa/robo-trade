@@ -3,6 +3,16 @@
 // Carteiras "simulado" só anotam; carteiras "testnet" mandam ordens na Binance Testnet.
 import { backtest, backtestBanca, backtestDCA, backtestRsiAlvo, calcularSinais, Candle, Estrategia, ESTRATEGIAS, motivo, TAXA } from "./logica.ts";
 import { comprar, temChaves, testarConta, vender } from "./binance.ts";
+import { lerContaReal } from "./leitura.ts";
+
+// Guarda a foto da conta real (só leitura) para o app mostrar
+async function atualizarContaReal() {
+  let dados = null, erro: string | null = null;
+  try { dados = await lerContaReal(); } catch (e) { erro = (e as Error).message; }
+  if (!dados && !erro) return null; // chave de leitura ainda não colocada
+  await db("robo_conta_real", { method: "POST", body: JSON.stringify({ id: 1, ...(dados ?? {}), erro, atualizado_em: new Date().toISOString() }), headers: { Prefer: "return=minimal,resolution=merge-duplicates" } });
+  return dados ?? { erro };
+}
 
 const URL_SB = Deno.env.get("SUPABASE_URL")!;
 const CHAVE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -338,7 +348,12 @@ Deno.serve(async (req) => {
   const u = new URL(req.url);
   const acao = u.searchParams.get("acao") ?? "rodar";
   try {
-    if (acao === "rodar") return json({ ok: true, carteiras: await rodar() });
+    if (acao === "rodar") {
+      const carteiras = await rodar();
+      const conta_real = await atualizarContaReal().catch((e) => ({ erro: (e as Error).message }));
+      return json({ ok: true, carteiras, conta_real });
+    }
+    if (acao === "conta_real") return json({ ok: true, conta_real: await atualizarContaReal() });
     if (acao === "backtest") {
       const par = (u.searchParams.get("par") ?? "BTCUSDT").toUpperCase();
       const tempo = u.searchParams.get("tempo") ?? "1h";

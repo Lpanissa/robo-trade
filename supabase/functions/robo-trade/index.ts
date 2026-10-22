@@ -7,9 +7,10 @@ import { lerContaReal } from "./leitura.ts";
 
 // Guarda a foto da conta real (só leitura) para o app mostrar
 async function atualizarContaReal() {
-  let dados = null, erro: string | null = null;
+  let dados: Awaited<ReturnType<typeof lerContaReal>> = null, erro: string | null = null;
   try { dados = await lerContaReal(); } catch (e) { erro = (e as Error).message; }
   if (!dados && !erro) return null; // chave de leitura ainda não colocada
+  if (dados) await avisarOperacoesReais(dados).catch(() => {});
   await db("robo_conta_real", { method: "POST", body: JSON.stringify({ id: 1, ...(dados ?? {}), erro, atualizado_em: new Date().toISOString() }), headers: { Prefer: "return=minimal,resolution=merge-duplicates" } });
   return dados ?? { erro };
 }
@@ -121,6 +122,42 @@ async function avisar(tipo: "compra" | "venda", par: string, preco: number, rsiA
       click: `https://www.binance.com/pt-BR/trade/${par.replace("USDT", "_USDT")}?type=spot`,
     }),
   });
+}
+
+// Aviso no celular quando aparece compra ou venda nova na conta REAL (feita pelos bots ou por você)
+async function avisarOperacoesReais(dados: NonNullable<Awaited<ReturnType<typeof lerContaReal>>>) {
+  const ant = await db("robo_conta_real?id=eq.1&select=operacoes");
+  const antes: any[] = ant?.[0]?.operacoes ?? [];
+  if (!antes.length) return; // primeira leitura: não avisa o passado
+  const ultimo = Math.max(...antes.map((o) => Number(o.em)));
+  const novas = dados.operacoes.filter((o) => o.em > ultimo).reverse();
+  const cfg = await db("robo_config?chave=eq.ntfy_topico&select=valor");
+  const topico = cfg?.[0]?.valor;
+  if (!topico) return;
+  const brl = dados.usdt_brl || 0;
+  const reais = (usd: number) => (usd * brl).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+  const dolar = (usd: number) => usd.toLocaleString("pt-BR", { style: "currency", currency: "USD" });
+  for (const o of novas) {
+    const nome = NOMES[o.moeda + "USDT"] ?? o.moeda;
+    let titulo: string, msg: string, tag: string;
+    if (o.tipo === "compra") {
+      titulo = `Comprou ${nome}`;
+      msg = `Comprou ${reais(o.valor_usdt)} (${dolar(o.valor_usdt)}) de ${nome} a ${dolar(o.preco_usdt)}.`;
+      tag = "shopping_cart";
+    } else {
+      const l = o.lucro_usdt;
+      const ganhou = l != null && l >= 0;
+      titulo = l == null ? `Vendeu ${nome}` : `Vendeu ${nome}: ${ganhou ? "LUCRO" : "PREJUÍZO"}`;
+      msg = `Vendeu ${reais(o.valor_usdt)} (${dolar(o.valor_usdt)}) de ${nome} a ${dolar(o.preco_usdt)}.` +
+        (l == null ? "" : ` ${ganhou ? "Lucro" : "Prejuízo"} de ${reais(Math.abs(l))} (${o.lucro_pct != null ? `${o.lucro_pct >= 0 ? "+" : ""}${o.lucro_pct.toLocaleString("pt-BR", { maximumFractionDigits: 2 })}%` : ""}).`);
+      tag = ganhou ? "moneybag" : "small_red_triangle_down";
+    }
+    await fetch("https://ntfy.sh/", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ topic: topico, title: titulo, message: msg, priority: 5, tags: [tag] }),
+    });
+  }
 }
 
 // Banca única para várias moedas (até max_posicoes ao mesmo tempo).

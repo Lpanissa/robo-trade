@@ -106,14 +106,34 @@ export type ContaReal = {
   usdt_brl: number | null;
   erro: string | null;
   atualizado_em: string;
+  operacoes: OperacaoReal[];
+  posicoes: Record<string, { qtd: number; preco_medio: number; desde: number }>;
 };
+
+export type OperacaoReal = {
+  em: number; moeda: string; par: string; tipo: "compra" | "venda";
+  qtd: number; preco_usdt: number; valor_usdt: number; lucro_usdt: number | null; lucro_pct: number | null;
+};
+
+// Velas (candles) com o preço real da Binance (dados públicos)
+export async function buscarVelas(par: string, intervalo: string, limite = 80) {
+  for (const base of ["https://data-api.binance.vision", "https://api.binance.com"]) {
+    try {
+      const r = await fetch(`${base}/api/v3/klines?symbol=${par}&interval=${intervalo}&limit=${limite}`);
+      if (!r.ok) continue;
+      const l = (await r.json()) as any[][];
+      return l.map((k) => ({ t: Number(k[0]), o: Number(k[1]), h: Number(k[2]), l: Number(k[3]), c: Number(k[4]) }));
+    } catch {}
+  }
+  throw new Error("Não consegui buscar o preço na Binance.");
+}
 
 export async function buscarContaReal(): Promise<ContaReal | null> {
   try {
     const l = await ler<any[]>("robo_conta_real?select=*&id=eq.1");
     if (!l.length) return null;
     const c = l[0];
-    return { ...c, total_usdt: num(c.total_usdt), total_brl: num(c.total_brl), usdt_brl: num(c.usdt_brl), moedas: c.moedas ?? [] };
+    return { ...c, total_usdt: num(c.total_usdt), total_brl: num(c.total_brl), usdt_brl: num(c.usdt_brl), moedas: c.moedas ?? [], operacoes: c.operacoes ?? [], posicoes: c.posicoes ?? {} };
   } catch {
     return null; // tabela ainda não criada ou sem chave de leitura
   }

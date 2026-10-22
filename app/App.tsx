@@ -157,42 +157,26 @@ function PosicoesCard({ r, t, s, oculto, aoTocar }: { r: ContaReal; t: Tema; s: 
     const preco = m && m.qtd ? m.usdt / m.qtd : pos.preco_medio;
     const res = (preco / pos.preco_medio - 1) * 100;
     const ganho = (preco - pos.preco_medio) * pos.qtd;
-    return { moeda, pos, preco, res, ganho, valor: pos.qtd * preco };
+    return { moeda, pos, res, ganho };
   });
-  const aberta = lista.length > 0;
   return (
-    <View style={[s.painel, s.cartao, { borderWidth: 2, borderColor: aberta ? t.acento : t.borda }]}>
+    <View style={[s.painel, { paddingVertical: 10, gap: 6 }]}>
       <View style={s.linhaEntre}>
-        <Text style={s.cartaoTitulo}>Posições abertas</Text>
-        <View style={[s.pilula, { backgroundColor: aberta ? t.acentoFraco : t.painel2 }]}>
-          <View style={[s.ponto, { backgroundColor: aberta ? t.acento : t.suave }]} />
-          <Text style={[s.pilulaTexto, { color: aberta ? t.acento : t.suave }]}>{aberta ? `${lista.length} em operação` : "Nenhuma"}</Text>
-        </View>
+        <Text style={[s.rotulo, { marginTop: 0, marginBottom: 0 }]}>Posições abertas</Text>
+        <Text style={s.textoSuave}>{lista.length ? `${lista.length}` : "Nenhuma"}</Text>
       </View>
-      {!aberta ? (
-        <Text style={s.textoSuave}>Você não está em nenhuma operação agora. Os bots estão esperando o sinal de compra.</Text>
-      ) : (
-        lista.map((p) => (
-          <Pressable key={p.moeda} onPress={() => aoTocar(p.moeda + "USDT")}
-            style={[s.indicador, { backgroundColor: p.res >= 0 ? t.altaFraca : t.baixaFraca, gap: 4 }]}>
-            <View style={s.linhaEntre}>
-              <Text style={[s.cartaoTitulo, { fontSize: 18 }]}>{nomeMoeda(p.moeda + "USDT")}</Text>
-              <Text style={[s.precoGrande, { fontSize: 26, color: corDoNumero(t, Math.round(p.res * 100) / 100) }]}>{pct(p.res)}</Text>
-            </View>
-            <View style={s.linhaEntre}>
-              <Text style={s.textoSuave}>Comprou a {dinheiro(p.pos.preco_medio)}</Text>
-              <Text style={[s.textoNormal, { fontWeight: "700", color: corDoNumero(t, p.ganho) }]}>
-                {oculto ? "••••" : `${p.ganho >= 0 ? "+" : "-"}${reais(Math.abs(p.ganho) * brl)}`}
-              </Text>
-            </View>
-            <View style={s.linhaEntre}>
-              <Text style={s.textoSuave}>Agora {dinheiro(p.preco)}</Text>
-              <Text style={s.textoSuave}>{oculto ? "••••" : `vale ${reais(p.valor * brl)}`}</Text>
-            </View>
-            <Text style={s.miudo}>Desde {p.pos.desde ? dataHora(p.pos.desde) : "-"} · toque para ver no gráfico</Text>
-          </Pressable>
-        ))
-      )}
+      {lista.map((p) => (
+        <Pressable key={p.moeda} onPress={() => aoTocar(p.moeda + "USDT")} style={[s.linhaEntre, { paddingVertical: 4 }]}>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 8, flex: 1 }}>
+            <View style={[s.ponto, { backgroundColor: p.res >= 0 ? t.alta : t.baixa }]} />
+            <Text style={[s.textoNormal, { fontWeight: "600" }]}>{nomeMoeda(p.moeda + "USDT")}</Text>
+            <Text style={s.textoSuave}>a {dinheiro(p.pos.preco_medio)}</Text>
+          </View>
+          <Text style={[s.textoNormal, { fontWeight: "700", color: corDoNumero(t, Math.round(p.res * 100) / 100) }]}>
+            {pct(p.res)}{oculto ? "" : ` · ${p.ganho >= 0 ? "+" : "-"}${reais(Math.abs(p.ganho) * brl)}`}
+          </Text>
+        </Pressable>
+      ))}
     </View>
   );
 }

@@ -1,7 +1,7 @@
 // Robô Trade — roda na nuvem (Supabase) a cada 5 minutos.
 // Lê o histórico de preços da Binance (dados públicos) e decide compra/venda.
 // Carteiras "simulado" só anotam; carteiras "testnet" mandam ordens na Binance Testnet.
-import { backtest, backtestBanca, calcularSinais, Candle, Estrategia, ESTRATEGIAS, motivo, TAXA } from "./logica.ts";
+import { backtest, backtestBanca, backtestDCA, calcularSinais, Candle, Estrategia, ESTRATEGIAS, motivo, TAXA } from "./logica.ts";
 import { comprar, temChaves, testarConta, vender } from "./binance.ts";
 
 const URL_SB = Deno.env.get("SUPABASE_URL")!;
@@ -357,6 +357,21 @@ Deno.serve(async (req) => {
       for (const p of pares) mapa[p] = (await candles(p, tempo, qtd)).fechados;
       const max = Math.max(1, Math.min(pares.length, Number(u.searchParams.get("max") ?? 1) || 1));
       return json({ ok: true, resultado: backtestBanca(mapa, "rsi", 1000, max) });
+    }
+    if (acao === "backtest_dca") {
+      const dias = Math.max(1, Math.min(250, Number(u.searchParams.get("dias") ?? 184) || 184));
+      const pares = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT"];
+      const configs = [
+        { desvio: 1.5, maxSeg: 5, mult: 1.5, alvo: 1.5 },
+        { desvio: 2, maxSeg: 6, mult: 1.3, alvo: 2 },
+        { desvio: 3, maxSeg: 5, mult: 1.5, alvo: 3 },
+      ];
+      const out: Record<string, unknown> = {};
+      for (const p of pares) {
+        const { fechados } = await candles(p, "1h", Math.ceil(dias * 24) + 50);
+        out[p] = configs.map((cfg) => backtestDCA(fechados, cfg));
+      }
+      return json({ ok: true, resultado: out });
     }
     if (acao === "testar_aviso") {
       await avisar("compra", "SOLUSDT", 106.9, 28.4, true);

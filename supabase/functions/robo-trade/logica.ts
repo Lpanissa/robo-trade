@@ -281,3 +281,65 @@ export function backtestBanca(mapa: Record<string, Candle[]>, estrategia: Estrat
     lista: ops.slice(-40).reverse().map((o) => ({ ...o, resultado_pct: round(o.resultado_pct) })),
   };
 }
+
+// ---------- Simulação do bot DCA Spot (estilo Binance) ----------
+// Compra uma ordem base; se o preço cair "desvio"% abaixo da última compra, faz
+// uma ordem de segurança (cada uma "mult" vezes maior), até "maxSeg" ordens.
+// Vende tudo quando o preço passa "alvo"% acima do preço médio, e recomeça.
+export type ConfigDCA = { desvio: number; maxSeg: number; mult: number; alvo: number };
+
+export function backtestDCA(candles: Candle[], cfg: ConfigDCA, saldo = 1000) {
+  const pesos = [1];
+  for (let i = 1; i <= cfg.maxSeg; i++) pesos.push(pesos[i - 1] * cfg.mult);
+  const somaPesos = pesos.reduce((a, b) => a + b, 0);
+  let caixa = saldo, qtd = 0, gasto = 0, passo = 0, ultimaCompra = 0, ciclos = 0, lucros = 0, travado = 0;
+  const patrimonio: number[] = [];
+  let pico = saldo, maiorQueda = 0;
+  for (let i = 0; i < candles.length; i++) {
+    const p = candles[i].c;
+    const comprar = (valor: number) => {
+      valor = Math.min(valor, caixa);
+      if (valor <= 0) return;
+      qtd += (valor * (1 - TAXA)) / p; gasto += valor; caixa -= valor; ultimaCompra = p; passo++;
+    };
+    if (qtd === 0) {
+      // valor da banca no início do ciclo (lucro é reinvestido)
+      comprar((caixa * pesos[0]) / somaPesos);
+    } else {
+      const medio = gasto / qtd;
+      if (p >= medio * (1 + cfg.alvo / 100)) {
+        const valor = qtd * p * (1 - TAXA);
+        lucros += valor - gasto; caixa += valor; qtd = 0; gasto = 0; passo = 0; ciclos++;
+      } else if (passo <= cfg.maxSeg && p <= ultimaCompra * (1 - cfg.desvio / 100)) {
+        const totalCiclo = caixa + gasto;
+        comprar((totalCiclo * pesos[passo]) / somaPesos);
+      }
+      if (qtd > 0 && passo > cfg.maxSeg) travado++;
+    }
+    const pat = caixa + qtd * p;
+    patrimonio.push(pat);
+    if (pat > pico) pico = pat;
+    maiorQueda = Math.max(maiorQueda, (1 - pat / pico) * 100);
+  }
+  const final = patrimonio[patrimonio.length - 1] ?? saldo;
+  const mesDe = (t: number) => new Date(t - 3 * 3600_000).toISOString().slice(0, 7);
+  const mensal: { mes: string; robo_pct: number }[] = [];
+  let iIni = 0;
+  for (let i = 1; i <= candles.length; i++) {
+    if (i === candles.length || mesDe(candles[i].t) !== mesDe(candles[iIni].t)) {
+      const base = iIni === 0 ? saldo : patrimonio[iIni - 1];
+      mensal.push({ mes: mesDe(candles[iIni].t), robo_pct: round((patrimonio[i - 1] / base - 1) * 100) });
+      iIni = i;
+    }
+  }
+  return {
+    cfg,
+    resultado_pct: round((final / saldo - 1) * 100),
+    segurar_pct: round(((candles[candles.length - 1].c / candles[0].c) * (1 - TAXA) - 1) * 100),
+    ciclos,
+    maior_queda_pct: round(maiorQueda),
+    horas_travado: travado,
+    aberto_no_fim: qtd > 0,
+    mensal,
+  };
+}

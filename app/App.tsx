@@ -405,28 +405,48 @@ function inicioDe(dias: number) {
 
 function Historico({ t, s, r, oculto }: { t: Tema; s: Estilos; r: ContaReal; oculto: boolean }) {
   const brl = r.usdt_brl ?? 0;
+  const [periodo, setPeriodo] = useState(2); // Mês
   const [filtro, setFiltro] = useState<string>("todas");
+  const desde = inicioDe(PERIODOS[periodo].dias);
+  const vendasPeriodo = r.operacoes.filter((o) => o.tipo === "venda" && o.em >= desde && o.lucro_usdt != null);
+  const lucro = vendasPeriodo.reduce((a, o) => a + (o.lucro_usdt ?? 0), 0);
+  const acertos = vendasPeriodo.filter((o) => (o.lucro_usdt ?? 0) > 0).length;
+  const melhor = vendasPeriodo.reduce<OperacaoReal | null>((m, o) => (!m || (o.lucro_pct ?? 0) > (m.lucro_pct ?? 0) ? o : m), null);
+  const pior = vendasPeriodo.reduce<OperacaoReal | null>((m, o) => (!m || (o.lucro_pct ?? 0) < (m.lucro_pct ?? 0) ? o : m), null);
+  const brlTxt = (usd: number) => (oculto ? "••••" : `${usd > 0 ? "+" : usd < 0 ? "-" : ""}${reais(Math.abs(usd) * brl)}`);
+
+  // Operações agrupadas por dia (mais recente primeiro)
   const ops = r.operacoes.filter((o) => filtro === "todas" || o.moeda === filtro);
+  const dias: { chave: string; titulo: string; ops: OperacaoReal[]; lucro: number; vendas: number }[] = [];
+  for (const o of ops) {
+    const d = new Date(o.em);
+    const chave = d.toDateString();
+    let g = dias.find((x) => x.chave === chave);
+    if (!g) { g = { chave, titulo: tituloDia(d), ops: [], lucro: 0, vendas: 0 }; dias.push(g); }
+    g.ops.push(o);
+    if (o.tipo === "venda" && o.lucro_usdt != null) { g.lucro += o.lucro_usdt; g.vendas++; }
+  }
+
   return (
     <View style={{ gap: 14 }}>
       <View style={[s.painel, s.cartao]}>
-        <Text style={s.cartaoTitulo}>Lucro das vendas</Text>
-        <View style={s.numeros}>
-          {PERIODOS.map((p) => {
-            const desde = inicioDe(p.dias);
-            const vendas = r.operacoes.filter((o) => o.tipo === "venda" && o.em >= desde && o.lucro_usdt != null);
-            const lucro = vendas.reduce((a, o) => a + (o.lucro_usdt ?? 0), 0);
-            return (
-              <View key={p.nome} style={[s.indicador, { flexGrow: 1, minWidth: 140 }]}>
-                <Text style={s.rotulo}>{p.nome}</Text>
-                <Text style={[s.numero, { color: corDoNumero(t, vendas.length ? lucro : null) }]}>
-                  {oculto ? "••••" : `${lucro > 0 ? "+" : lucro < 0 ? "-" : ""}${reais(Math.abs(lucro) * brl)}`}
-                </Text>
-                <Text style={s.textoSuave}>{vendas.length} {vendas.length === 1 ? "venda" : "vendas"}</Text>
-              </View>
-            );
-          })}
+        <View style={[s.chips, { marginBottom: 0 }]}>
+          {PERIODOS.map((p, k) => <Chip key={p.nome} s={s} ativo={k === periodo} texto={p.nome} onPress={() => setPeriodo(k)} />)}
         </View>
+        <View>
+          <Text style={s.rotulo}>Lucro das vendas · {PERIODOS[periodo].nome}</Text>
+          <Text style={[s.precoGrande, { color: corDoNumero(t, vendasPeriodo.length ? Math.round(lucro * 100) / 100 : null) }]}>{brlTxt(lucro)}</Text>
+        </View>
+        <View style={s.numeros}>
+          <Numero s={s} rotulo="Vendas" valor={String(vendasPeriodo.length)} />
+          <Numero s={s} rotulo="No lucro" valor={vendasPeriodo.length ? `${acertos} de ${vendasPeriodo.length}` : "-"} />
+        </View>
+        {melhor && vendasPeriodo.length > 1 && (
+          <View style={s.numeros}>
+            <Numero s={s} rotulo="Melhor" valor={`${nomeMoeda(melhor.moeda + "USDT")} ${pct(melhor.lucro_pct)}`} cor={corDoNumero(t, melhor.lucro_pct)} />
+            {pior && <Numero s={s} rotulo="Pior" valor={`${nomeMoeda(pior.moeda + "USDT")} ${pct(pior.lucro_pct)}`} cor={corDoNumero(t, pior.lucro_pct)} />}
+          </View>
+        )}
         <Text style={s.textoSuave}>Conta só o que já foi vendido. O que ainda está comprado aparece na aba Agora.</Text>
       </View>
 
@@ -434,37 +454,55 @@ function Historico({ t, s, r, oculto }: { t: Tema; s: Estilos; r: ContaReal; ocu
         <Text style={s.cartaoTitulo}>Operações</Text>
         <View style={[s.chips, { marginBottom: 0 }]}>
           <Chip s={s} ativo={filtro === "todas"} texto="Todas" onPress={() => setFiltro("todas")} />
-          {PARES.map((p) => { const m = p.replace("USDT", ""); return <Chip key={m} s={s} ativo={filtro === m} texto={nomeMoeda(p)} onPress={() => setFiltro(m)} />; })}
+          {PARES.map((p) => { const m = p.replace("USDT", ""); return <Chip key={m} s={s} ativo={filtro === m} texto={m} onPress={() => setFiltro(m)} />; })}
         </View>
-        {ops.length === 0 ? (
+        {dias.length === 0 ? (
           <Text style={s.textoSuave}>Nenhuma operação ainda.</Text>
         ) : (
-          ops.map((o, i) => <LinhaReal key={`${o.em}-${i}`} o={o} t={t} s={s} brl={brl} oculto={oculto} ultima={i === ops.length - 1} />)
+          dias.map((g) => (
+            <View key={g.chave}>
+              <View style={[s.linhaEntre, { backgroundColor: t.painel2, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6, marginTop: 6 }]}>
+                <Text style={[s.textoSuave, { fontWeight: "700", color: t.texto }]}>{g.titulo}</Text>
+                <Text style={[s.textoSuave, { fontWeight: "700", color: g.vendas ? corDoNumero(t, Math.round(g.lucro * 100) / 100) : t.suave }]}>
+                  {g.vendas ? brlTxt(g.lucro) : `${g.ops.length} ${g.ops.length === 1 ? "operação" : "operações"}`}
+                </Text>
+              </View>
+              {g.ops.map((o, i) => <LinhaReal key={`${o.em}-${i}`} o={o} t={t} s={s} brl={brl} oculto={oculto} ultima={i === g.ops.length - 1} />)}
+            </View>
+          ))
         )}
       </View>
     </View>
   );
 }
 
+function tituloDia(d: Date) {
+  const hoje = new Date(); hoje.setHours(0, 0, 0, 0);
+  const dia = new Date(d); dia.setHours(0, 0, 0, 0);
+  const dif = Math.round((hoje.getTime() - dia.getTime()) / 86400000);
+  if (dif === 0) return "Hoje";
+  if (dif === 1) return "Ontem";
+  return d.toLocaleDateString("pt-BR", { weekday: "short", day: "2-digit", month: "2-digit", year: dia.getFullYear() !== hoje.getFullYear() ? "2-digit" : undefined });
+}
+
 function LinhaReal({ o, t, s, brl, oculto, ultima }: { o: OperacaoReal; t: Tema; s: Estilos; brl: number; oculto: boolean; ultima: boolean }) {
   const compra = o.tipo === "compra";
+  const hora = new Date(o.em).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
   return (
-    <View style={[s.linhaOp, !ultima && { borderBottomWidth: 1, borderBottomColor: t.borda }]}>
-      <View style={{ width: 34, height: 34, borderRadius: 17, alignItems: "center", justifyContent: "center", backgroundColor: compra ? t.altaFraca : t.baixaFraca }}>
-        <Svg width={12} height={12}><Path d={compra ? "M6 1 L11 10 L1 10 Z" : "M6 11 L11 2 L1 2 Z"} fill={compra ? t.alta : t.baixa} /></Svg>
+    <View style={[s.linhaOp, { paddingVertical: 8 }, !ultima && { borderBottomWidth: 1, borderBottomColor: t.borda }]}>
+      <View style={{ width: 28, height: 28, borderRadius: 14, alignItems: "center", justifyContent: "center", backgroundColor: compra ? t.altaFraca : t.baixaFraca }}>
+        <Svg width={10} height={10}><Path d={compra ? "M5 1 L9 8 L1 8 Z" : "M5 9 L9 2 L1 2 Z"} fill={compra ? t.alta : t.baixa} /></Svg>
       </View>
       <View style={{ flex: 1 }}>
-        <Text style={[s.textoNormal, { fontWeight: "700" }]}>{compra ? "Compra" : "Venda"} · {nomeMoeda(o.moeda + "USDT")}</Text>
-        <Text style={s.textoSuave}>{dataHora(o.em)} · a {dinheiro(o.preco_usdt)}</Text>
+        <Text style={[s.textoNormal, { fontWeight: "700" }]}>{compra ? "Compra" : "Venda"} {nomeMoeda(o.moeda + "USDT")}</Text>
+        <Text style={s.textoSuave}>{hora} · a {dinheiro(o.preco_usdt)} · {oculto ? "••••" : reais(o.valor_usdt * brl)}</Text>
       </View>
-      <View style={{ alignItems: "flex-end" }}>
-        <Text style={s.textoNormal}>{oculto ? "••••" : reais(o.valor_usdt * brl)}</Text>
-        {!compra && o.lucro_usdt != null && (
-          <Text style={[s.textoSuave, { color: corDoNumero(t, o.lucro_usdt), fontWeight: "700" }]}>
-            {o.lucro_usdt >= 0 ? "Lucro" : "Prejuízo"} {oculto ? "••••" : reais(Math.abs(o.lucro_usdt) * brl)} ({pct(o.lucro_pct)})
-          </Text>
-        )}
-      </View>
+      {!compra && o.lucro_usdt != null && (
+        <View style={{ alignItems: "flex-end" }}>
+          <Text style={[s.textoNormal, { color: corDoNumero(t, o.lucro_usdt), fontWeight: "700" }]}>{pct(o.lucro_pct)}</Text>
+          <Text style={[s.textoSuave, { color: corDoNumero(t, o.lucro_usdt) }]}>{oculto ? "••••" : `${o.lucro_usdt >= 0 ? "+" : "-"}${reais(Math.abs(o.lucro_usdt) * brl)}`}</Text>
+        </View>
+      )}
     </View>
   );
 }

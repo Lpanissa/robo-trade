@@ -20,7 +20,10 @@ jobs:
           CHAVE: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZ5eGtzdnlkeHd2eWdqZWJhbm5vIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTExMzE5MDMsImV4cCI6MjEwNjcwNzkwM30.qUHr5gl00vF2JG7YaostqpOqhEMSEPSci1ySH1D-Fik
         run: |
           mkdir -p analise/dados
-          for par in BTCUSDT ETHUSDT SOLUSDT BNBUSDT; do
+          # As moedas ficam na primeira linha de analise/pedido.txt (ex.: BTCUSDT ETHUSDT)
+          PARES=$(head -n1 analise/pedido.txt | grep -oE '[A-Z0-9]+USDT' | tr '\n' ' ')
+          [ -z "$PARES" ] && PARES="BTCUSDT ETHUSDT SOLUSDT BNBUSDT"
+          for par in $PARES; do
             for tempo in 15m 1h 4h 1d; do
               curl -sS --fail --retry 3 --max-time 140 \
                 -H "Authorization: Bearer $CHAVE" \

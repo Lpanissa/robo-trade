@@ -470,8 +470,9 @@ function LinhaReal({ o, t, s, brl, oculto, ultima }: { o: OperacaoReal; t: Tema;
 }
 
 // ---------------- Peças ----------------
+// Mostra as moedas abreviadas: BTC, ETH, SOL, BNB
 function nomeMoeda(par: string) {
-  return MOEDAS.find((m) => m.par === par)?.nome ?? par.replace("USDT", "");
+  return par.replace(/USDT$/, "");
 }
 
 // Testnet primeiro (banca na frente); depois as simuladas

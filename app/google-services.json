@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "230034385702",
+    "project_id": "panissasset-b97c9",
+    "storage_bucket": "panissasset-b97c9.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:230034385702:android:fcf800242f84e8679fafe7",
+        "android_client_info": {
+          "package_name": "com.panissa.robotrade"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyA3LkcwSy6uZlO00-P7OT0GTAQf9TIrZtQ"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

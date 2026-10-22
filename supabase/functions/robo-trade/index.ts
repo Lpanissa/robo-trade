@@ -131,9 +131,9 @@ async function avisarOperacoesReais(dados: NonNullable<Awaited<ReturnType<typeof
   if (!antes.length) return; // primeira leitura: não avisa o passado
   const ultimo = Math.max(...antes.map((o) => Number(o.em)));
   const novas = dados.operacoes.filter((o) => o.em > ultimo).reverse();
+  if (!novas.length) return;
   const cfg = await db("robo_config?chave=eq.ntfy_topico&select=valor");
   const topico = cfg?.[0]?.valor;
-  if (!topico) return;
   const brl = dados.usdt_brl || 0;
   const reais = (usd: number) => (usd * brl).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
   const dolar = (usd: number) => usd.toLocaleString("pt-BR", { style: "currency", currency: "USD" });
@@ -152,12 +152,82 @@ async function avisarOperacoesReais(dados: NonNullable<Awaited<ReturnType<typeof
         (l == null ? "" : ` ${ganhou ? "Lucro" : "Prejuízo"} de ${reais(Math.abs(l))} (${o.lucro_pct != null ? `${o.lucro_pct >= 0 ? "+" : ""}${o.lucro_pct.toLocaleString("pt-BR", { maximumFractionDigits: 2 })}%` : ""}).`);
       tag = ganhou ? "moneybag" : "small_red_triangle_down";
     }
-    await fetch("https://ntfy.sh/", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ topic: topico, title: titulo, message: msg, priority: 5, tags: [tag] }),
-    });
+    await enviarPush(titulo, msg).catch(() => {});
+    if (topico) {
+      await fetch("https://ntfy.sh/", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ topic: topico, title: titulo, message: msg, priority: 5, tags: [tag] }),
+      });
+    }
   }
+}
+
+// ---------- Aviso direto no app (Firebase Cloud Messaging) ----------
+// A conta de serviço do Firebase fica no Secret FCM_CONTA (colocada pelo dono).
+let tokenGoogle: { valor: string; expira: number } | null = null;
+
+function base64url(dados: Uint8Array | string) {
+  const bytes = typeof dados === "string" ? new TextEncoder().encode(dados) : dados;
+  let s = "";
+  for (const b of bytes) s += String.fromCharCode(b);
+  return btoa(s).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+async function acessoGoogle(conta: any) {
+  if (tokenGoogle && tokenGoogle.expira > Date.now() + 60_000) return tokenGoogle.valor;
+  const agora = Math.floor(Date.now() / 1000);
+  const cab = base64url(JSON.stringify({ alg: "RS256", typ: "JWT" }));
+  const corpo = base64url(JSON.stringify({
+    iss: conta.client_email, scope: "https://www.googleapis.com/auth/firebase.messaging",
+    aud: "https://oauth2.googleapis.com/token", iat: agora, exp: agora + 3600,
+  }));
+  const pem = String(conta.private_key).replace(/-----[^-]+-----/g, "").replace(/\s+/g, "");
+  const der = Uint8Array.from(atob(pem), (c) => c.charCodeAt(0));
+  const chave = await crypto.subtle.importKey("pkcs8", der, { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" }, false, ["sign"]);
+  const assinatura = new Uint8Array(await crypto.subtle.sign("RSASSA-PKCS1-v1_5", chave, new TextEncoder().encode(`${cab}.${corpo}`)));
+  const jwt = `${cab}.${corpo}.${base64url(assinatura)}`;
+  const r = await fetch("https://oauth2.googleapis.com/token", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({ grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer", assertion: jwt }),
+  });
+  const j = await r.json();
+  if (!r.ok) throw new Error(`Google recusou: ${j.error_description ?? j.error}`);
+  tokenGoogle = { valor: j.access_token, expira: Date.now() + Number(j.expires_in ?? 3600) * 1000 };
+  return tokenGoogle.valor;
+}
+
+async function enviarPush(titulo: string, msg: string) {
+  const bruto = Deno.env.get("FCM_CONTA");
+  if (!bruto) return { enviados: 0, erro: "Falta a conta de serviço do Firebase (FCM_CONTA)." };
+  const conta = JSON.parse(bruto);
+  const disp = await db("robo_dispositivos?select=token");
+  if (!disp?.length) return { enviados: 0, erro: "Nenhum celular registrado ainda." };
+  const acesso = await acessoGoogle(conta);
+  let enviados = 0;
+  const erros: string[] = [];
+  for (const d of disp) {
+    const r = await fetch(`https://fcm.googleapis.com/v1/projects/${conta.project_id}/messages:send`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${acesso}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        message: {
+          token: d.token,
+          notification: { title: titulo, body: msg },
+          android: { priority: "high", notification: { channel_id: "operacoes", sound: "default" } },
+        },
+      }),
+    });
+    if (r.ok) { enviados++; continue; }
+    const j = await r.json().catch(() => ({}));
+    const status = j?.error?.status ?? r.status;
+    // Celular que desinstalou o app: tira da lista
+    if (status === "NOT_FOUND" || status === "UNREGISTERED" || r.status === 404) {
+      await db(`robo_dispositivos?token=eq.${encodeURIComponent(d.token)}`, { method: "DELETE", headers: { Prefer: "return=minimal" } });
+    } else erros.push(String(j?.error?.message ?? status));
+  }
+  return { enviados, erro: erros[0] ?? null };
 }
 
 // Banca única para várias moedas (até max_posicoes ao mesmo tempo).
@@ -437,6 +507,9 @@ Deno.serve(async (req) => {
         out[p] = linhas;
       }
       return json({ ok: true, resultado: out });
+    }
+    if (acao === "testar_push") {
+      return json({ ok: true, ...(await enviarPush("PanissAsset", "Teste: os avisos de compra e venda vão chegar aqui.")) });
     }
     if (acao === "testar_aviso") {
       await avisar("compra", "SOLUSDT", 106.9, 28.4, true);

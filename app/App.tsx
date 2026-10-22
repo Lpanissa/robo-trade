@@ -11,6 +11,7 @@ import {
 import Velas, { LegendaVelas, Vela } from "./src/Velas";
 import { Atualizacao, baixarAtualizacao, ouvirToqueNaNotificacao, procurarAtualizacao } from "./src/atualizacao";
 import { corDoNumero, Tema, useTema } from "./src/tema";
+import { registrarAvisos } from "./src/push";
 
 type Aba = "agora" | "historico";
 
@@ -66,6 +67,9 @@ function Tela() {
   };
 
   // Procura versão nova ao abrir, ao voltar para o app e a cada 30 minutos
+  // Registra este celular para receber os avisos de compra e venda
+  useEffect(() => { registrarAvisos(); }, []);
+
   useEffect(() => {
     const checar = () => procurarAtualizacao().then(setAtualizacao);
     checar();

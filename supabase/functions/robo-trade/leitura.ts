@@ -3,7 +3,7 @@
 //   BINANCE_LEITURA_KEY e BINANCE_LEITURA_SECRET
 
 const BASE = "https://api.binance.com";
-const MOEDAS = ["BTC", "ETH", "SOL", "BNB"];
+const MOEDAS = ["BTC", "ETH", "SOL", "BNB", "DOGE", "PEPE", "ADA", "LINK"];
 const COTACOES = ["USDT", "BRL"];
 
 async function assinar(secret: string, texto: string) {
@@ -46,7 +46,7 @@ export async function lerContaReal() {
     const bruto = String(b.asset);
     const qtd = Number(b.free) + Number(b.locked);
     if (!(qtd > 0)) continue;
-    const earn = bruto.startsWith("LD") && ["USDT", "USDC", "FDUSD", "BRL", "BTC", "ETH", "SOL", "BNB"].includes(bruto.slice(2));
+    const earn = bruto.startsWith("LD") && ["USDT", "USDC", "FDUSD", "BRL", "BTC", "ETH", "SOL", "BNB", "DOGE", "PEPE", "ADA", "LINK"].includes(bruto.slice(2));
     const moeda = earn ? bruto.slice(2) : bruto;
     const p = (porMoeda[moeda] ??= { qtd: 0, earn: 0 });
     p.qtd += qtd;

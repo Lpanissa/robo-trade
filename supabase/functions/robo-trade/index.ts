@@ -152,7 +152,7 @@ async function testarHistorico(par: string, tempo: string, salvar = true, dias =
 }
 
 // ---------- Avisos no celular (app ntfy) ----------
-const NOMES: Record<string, string> = { BTCUSDT: "BTC", ETHUSDT: "ETH", SOLUSDT: "SOL", BNBUSDT: "BNB" };
+const NOMES: Record<string, string> = { BTCUSDT: "BTC", ETHUSDT: "ETH", SOLUSDT: "SOL", BNBUSDT: "BNB", DOGEUSDT: "DOGE", PEPEUSDT: "PEPE", ADAUSDT: "ADA", LINKUSDT: "LINK" };
 
 async function avisar(tipo: "compra" | "venda", par: string, preco: number, rsiAtual: number | null, teste = false) {
   const cfg = await db("robo_config?chave=eq.ntfy_topico&select=valor");

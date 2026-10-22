@@ -55,9 +55,9 @@ function Tela() {
             <Text style={s.titulo}>PanissAsset</Text>
             <Text style={s.legenda}>Roda sozinho na nuvem a cada 5 minutos</Text>
           </View>
-          <View style={s.selo}>
-            <View style={[s.ponto, { backgroundColor: t.acento }]} />
-            <Text style={[s.seloTexto, { color: t.acento }]}>Simulado</Text>
+          <View style={[s.selo, { borderColor: t.alta }]}>
+            <View style={[s.ponto, { backgroundColor: t.alta }]} />
+            <Text style={[s.seloTexto, { color: t.alta }]}>Real</Text>
           </View>
         </View>
         {atualizacao && (

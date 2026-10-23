@@ -100,7 +100,8 @@ export async function buscarCarteiras(): Promise<Carteira[]> {
 
 // Conta REAL da Binance (só leitura, atualizada pelo robô a cada 5 minutos)
 export type ContaReal = {
-  moedas: { moeda: string; qtd: number; usdt: number }[];
+  moedas: { moeda: string; qtd: number; usdt: number; earn?: number }[];
+  earn_usdt?: number | null;
   total_usdt: number | null;
   total_brl: number | null;
   usdt_brl: number | null;

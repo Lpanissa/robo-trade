@@ -12,7 +12,7 @@ const EIXO = 64;
 const ALTURA = 280;
 
 function formatar(n: number) {
-  const casas = n >= 1000 ? 0 : n >= 10 ? 2 : 4;
+  const casas = n >= 1000 ? 0 : n >= 10 ? 2 : n >= 0.01 ? 4 : Math.min(10, 2 - Math.floor(Math.log10(n)) + 1);
   return n.toLocaleString("pt-BR", { minimumFractionDigits: casas, maximumFractionDigits: casas });
 }
 
@@ -108,7 +108,7 @@ export default function Velas({ velas, t, medio, alvo, marcas, passoMs }: { vela
   );
 }
 
-export function LegendaVelas({ t, temPosicao }: { t: Tema; temPosicao: boolean }) {
+export function LegendaVelas({ t, temPosicao, alvoPct = 2.9 }: { t: Tema; temPosicao: boolean; alvoPct?: number }) {
   const item = (cor: string, texto: string, tracejado = false, tri?: "up" | "down") => (
     <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
       {tri ? (
@@ -122,7 +122,7 @@ export function LegendaVelas({ t, temPosicao }: { t: Tema; temPosicao: boolean }
   return (
     <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 14 }}>
       {temPosicao && item(t.acento, "Seu preço de compra", true)}
-      {temPosicao && item(t.alta, "Alvo de venda (+2,9%)", true)}
+      {temPosicao && item(t.alta, `Alvo de venda (+${alvoPct.toLocaleString("pt-BR")}%)`, true)}
       {item(t.alta, "Compra", false, "up")}
       {item(t.baixa, "Venda", false, "down")}
     </View>

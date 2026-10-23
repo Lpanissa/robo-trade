@@ -126,9 +126,11 @@ function Tela() {
   );
 }
 
-const PARES = ["SOLUSDT", "ETHUSDT", "BNBUSDT", "BTCUSDT"];
-const ALVO_PCT = 2.9; // os bots vendem com 2,9% de lucro
-const POR_COMPRA = 5.5; // cada compra dos bots usa 5,5 USDT
+const PARES = ["SOLUSDT", "DOGEUSDT", "PEPEUSDT", "ADAUSDT", "LINKUSDT", "ETHUSDT", "BNBUSDT", "BTCUSDT"];
+// Lucro alvo de cada robô no WunderTrading (vende quando chega nele)
+const ALVO: Record<string, number> = { SOL: 1, DOGE: 1.5, PEPE: 2, ADA: 2.9, LINK: 2.9, ETH: 2.9, BNB: 2.9, BTC: 2.9 };
+const alvoDe = (moeda: string) => ALVO[moeda] ?? 2.9;
+const POR_COMPRA = 5; // cada compra dos bots usa 5 USDT (LINK e PEPE usam 6)
 const INTERVALOS = [
   { id: "15m", nome: "15 min", ms: 15 * 60_000 },
   { id: "1h", nome: "1 hora", ms: 3600_000 },
@@ -172,7 +174,7 @@ function PosicoesCard({ r, t, s, oculto, aoTocar }: { r: ContaReal; t: Tema; s: 
           <View style={{ flexDirection: "row", alignItems: "center", gap: 8, flex: 1 }}>
             <View style={[s.ponto, { backgroundColor: p.res >= 0 ? t.alta : t.baixa }]} />
             <Text style={[s.textoNormal, { fontWeight: "600" }]}>{nomeMoeda(p.moeda + "USDT")}</Text>
-            <Text style={s.textoSuave}>a {dinheiro(p.pos.preco_medio)}</Text>
+            <Text style={s.textoSuave}>a {preco(p.pos.preco_medio)}</Text>
           </View>
           <Text style={[s.textoNormal, { fontWeight: "700", color: corDoNumero(t, Math.round(p.res * 100) / 100) }]}>
             {pct(p.res)}{oculto ? "" : ` · ${p.ganho >= 0 ? "+" : "-"}${reais(Math.abs(p.ganho) * brl)}`}
@@ -215,7 +217,7 @@ function GraficoCard({ r, t, s, oculto, par, setPar }: { r: ContaReal; t: Tema; 
       <View style={s.linhaEntre}>
         <View>
           <Text style={s.rotulo}>{nomeMoeda(par)} · {moeda}/USDT</Text>
-          <Text style={s.precoGrande}>{atual != null ? dinheiro(atual) : "-"}</Text>
+          <Text style={s.precoGrande}>{atual != null ? preco(atual) : "-"}</Text>
           <Text style={[s.textoSuave, { color: corDoNumero(t, variacao) }]}>{pct(variacao)} no gráfico</Text>
         </View>
       </View>
@@ -223,28 +225,28 @@ function GraficoCard({ r, t, s, oculto, par, setPar }: { r: ContaReal; t: Tema; 
         {INTERVALOS.map((i) => <Chip key={i.id} s={s} ativo={i.id === intervalo} texto={i.nome} onPress={() => setIntervalo(i.id)} />)}
       </View>
       {erro ? <Text style={[s.textoSuave, { color: t.baixa }]}>{erro}</Text> : velas.length ? (
-        <Velas velas={velas} t={t} medio={pos?.preco_medio ?? null} alvo={pos ? pos.preco_medio * (1 + ALVO_PCT / 100) : null} marcas={marcas} passoMs={passoMs} />
+        <Velas velas={velas} t={t} medio={pos?.preco_medio ?? null} alvo={pos ? pos.preco_medio * (1 + alvoDe(moeda) / 100) : null} marcas={marcas} passoMs={passoMs} />
       ) : <ActivityIndicator color={t.acento} style={{ height: 280 }} />}
-      <LegendaVelas t={t} temPosicao={!!pos} />
+      <LegendaVelas t={t} temPosicao={!!pos} alvoPct={alvoDe(moeda)} />
       {pos ? (
         <View style={[s.indicador, { backgroundColor: resultado != null && resultado >= 0 ? t.altaFraca : t.baixaFraca }]}>
           <Text style={s.rotulo}>Sua posição em {nomeMoeda(par)}</Text>
           <View style={s.linhaEntre}>
-            <Text style={s.textoNormal}>Comprou a {dinheiro(pos.preco_medio)}</Text>
+            <Text style={s.textoNormal}>Comprou a {preco(pos.preco_medio)}</Text>
             <Text style={[s.numero, { color: corDoNumero(t, resultado) }]}>{pct(resultado)}</Text>
           </View>
           <View style={s.linhaEntre}>
-            <Text style={s.textoSuave}>{oculto ? "••••" : `${numero(pos.qtd, 6)} ${moeda}`}</Text>
+            <Text style={s.textoSuave}>{oculto ? "••••" : `${numero(pos.qtd, pos.qtd >= 1000 ? 0 : 6)} ${moeda}`}</Text>
             <Text style={[s.textoNormal, { color: corDoNumero(t, ganhoUsd) }]}>
               {ganhoUsd == null || oculto ? "••••" : `${ganhoUsd >= 0 ? "+" : "-"}${reais(Math.abs(ganhoUsd) * brl)}`}
             </Text>
           </View>
           {atual != null && (() => {
-            const alvo = pos.preco_medio * (1 + ALVO_PCT / 100);
+            const alvo = pos.preco_medio * (1 + alvoDe(moeda) / 100);
             const falta = (alvo / atual - 1) * 100;
             return (
               <View style={s.linhaEntre}>
-                <Text style={s.textoSuave}>Alvo de venda {dinheiro(alvo)}</Text>
+                <Text style={s.textoSuave}>Alvo de venda {preco(alvo)}</Text>
                 <Text style={[s.textoNormal, { color: t.alta, fontWeight: "700" }]}>
                   {falta > 0 ? `faltam ${numero(falta, 1)}%` : "alvo atingido"}
                 </Text>
@@ -324,18 +326,31 @@ function LucroHoje({ r, t, s, oculto }: { r: ContaReal; t: Tema; s: Estilos; ocu
 
 // Quanto USDT está livre e pra quantas compras dos bots ele dá
 function DinheiroLivre({ r, t, s }: { r: ContaReal; t: Tema; s: Estilos }) {
-  const livre = r.moedas.find((m) => m.moeda === "USDT")?.qtd ?? 0;
+  const u = r.moedas.find((m) => m.moeda === "USDT");
+  const livre = u ? u.qtd - (u.earn ?? 0) : 0;
   const compras = Math.floor(livre / POR_COMPRA);
   const pouco = compras === 0;
+  const noEarn = r.earn_usdt ?? 0;
   return (
+    <View style={{ gap: 8 }}>
     <View style={[s.indicador, { flexDirection: "row", alignItems: "center", gap: 10, paddingVertical: 10, backgroundColor: pouco ? t.baixaFraca : t.painel2 }]}>
       <View style={[s.ponto, { backgroundColor: pouco ? t.baixa : compras === 1 ? t.acento : t.alta }]} />
       <Text style={[s.textoNormal, { flex: 1 }]}>
         {numero(livre, 2)} USDT livres{" "}
         <Text style={s.textoSuave}>
-          {pouco ? "· não dá pra nenhuma compra" : `· dá pra ${compras} ${compras === 1 ? "compra" : "compras"} de ${numero(POR_COMPRA, 1)}`}
+          {pouco ? "· não dá pra nenhuma compra" : `· dá pra ${compras} ${compras === 1 ? "compra" : "compras"}`}
         </Text>
       </Text>
+    </View>
+    {noEarn >= 1 && (
+      <View style={[s.indicador, { flexDirection: "row", alignItems: "center", gap: 10, paddingVertical: 10, backgroundColor: t.baixaFraca }]}>
+        <View style={[s.ponto, { backgroundColor: t.baixa }]} />
+        <Text style={[s.textoNormal, { flex: 1 }]}>
+          {numero(noEarn, 2)} USDT no Earn{" "}
+          <Text style={s.textoSuave}>· os robôs não compram nem vendem o que está lá. Resgate pra Spot.</Text>
+        </Text>
+      </View>
+    )}
     </View>
   );
 }
@@ -370,7 +385,7 @@ function ContaRealCard({ r, t, s, oculto }: { r: ContaReal; t: Tema; s: Estilos;
           return (
             <View key={m.moeda} style={s.linhaEntre}>
               <View style={{ flex: 1 }}>
-                <Text style={s.textoNormal}>{nomeMoeda(m.moeda + "USDT")}</Text>
+                <Text style={s.textoNormal}>{nomeMoeda(m.moeda + "USDT")}{(m.earn ?? 0) > 0 ? <Text style={s.textoSuave}> · no Earn</Text> : null}</Text>
                 <Text style={s.textoSuave}>{x(m.qtd.toLocaleString("pt-BR", { maximumFractionDigits: 8 }))}</Text>
               </View>
               <View style={{ alignItems: "flex-end" }}>
@@ -495,7 +510,7 @@ function LinhaReal({ o, t, s, brl, oculto, ultima }: { o: OperacaoReal; t: Tema;
       </View>
       <View style={{ flex: 1 }}>
         <Text style={[s.textoNormal, { fontWeight: "700" }]}>{nomeCompleto(o.moeda)}</Text>
-        <Text style={s.textoSuave}>{hora} · a {dinheiro(o.preco_usdt)} · {oculto ? "••••" : reais(o.valor_usdt * brl)}</Text>
+        <Text style={s.textoSuave}>{hora} · a {preco(o.preco_usdt)} · {oculto ? "••••" : reais(o.valor_usdt * brl)}</Text>
       </View>
       {!compra && o.lucro_usdt != null && (
         <View style={{ alignItems: "flex-end" }}>
@@ -510,10 +525,18 @@ function LinhaReal({ o, t, s, brl, oculto, ultima }: { o: OperacaoReal; t: Tema;
 // ---------------- Peças ----------------
 // Nome inteiro da moeda (usado no histórico)
 function nomeCompleto(moeda: string) {
-  return ({ BTC: "Bitcoin", ETH: "Ethereum", SOL: "Solana", BNB: "BNB" } as Record<string, string>)[moeda] ?? moeda;
+  return ({ BTC: "Bitcoin", ETH: "Ethereum", SOL: "Solana", BNB: "BNB", DOGE: "Dogecoin", PEPE: "Pepe", ADA: "Cardano", LINK: "Chainlink" } as Record<string, string>)[moeda] ?? moeda;
 }
 
 // Mostra as moedas abreviadas: BTC, ETH, SOL, BNB
+// Preço em dólar com as casas certas: PEPE custa US$ 0,0000046
+function preco(n: number | null | undefined) {
+  if (n == null || isNaN(n)) return "-";
+  if (n >= 1) return dinheiro(n);
+  const casas = Math.min(10, Math.max(4, 2 - Math.floor(Math.log10(n)) + 1));
+  return "US$ " + n.toLocaleString("pt-BR", { minimumFractionDigits: casas, maximumFractionDigits: casas });
+}
+
 function nomeMoeda(par: string) {
   return par.replace(/USDT$/, "");
 }

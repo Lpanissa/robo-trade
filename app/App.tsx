@@ -140,7 +140,6 @@ const INTERVALOS = [
 
 // ---------------- Agora ----------------
 function Agora({ t, s, r, carteiras, oculto }: { t: Tema; s: Estilos; r: ContaReal; carteiras: Carteira[] | null; oculto: boolean }) {
-  const banca = (carteiras ?? []).find((c) => ehBanca(c));
   // Moeda do gráfico: começa na que você tem; tocar numa posição aberta muda o gráfico
   const [par, setPar] = useState(PARES.find((p) => r.posicoes[p.replace("USDT", "")]) ?? "SOLUSDT");
   return (
@@ -148,7 +147,7 @@ function Agora({ t, s, r, carteiras, oculto }: { t: Tema; s: Estilos; r: ContaRe
       <PosicoesCard r={r} t={t} s={s} oculto={oculto} aoTocar={setPar} />
       <ContaRealCard r={r} t={t} s={s} oculto={oculto} />
       <GraficoCard r={r} t={t} s={s} oculto={oculto} par={par} setPar={setPar} />
-      {banca && <SinaisCard c={banca} t={t} s={s} />}
+      <SinaisCard r={r} t={t} s={s} />
     </View>
   );
 }
@@ -261,49 +260,79 @@ function GraficoCard({ r, t, s, oculto, par, setPar }: { r: ContaReal; t: Tema; 
   );
 }
 
-// RSI de cada moeda agora (o mesmo sinal que os bots usam)
-function SinaisCard({ c, t, s }: { c: Carteira; t: Tema; s: Estilos }) {
-  const ind = (c.indicadores ?? {}) as any;
-  const precos: Record<string, number> = ind.precos ?? {};
-  const rsis: Record<string, number | null> = ind.rsi ?? {};
-  const pares = PARES.filter((p) => c.par.split(",").includes(p));
+// Regra de compra de cada robô no WunderTrading: gráfico e limite do RSI
+const ROBOS = [
+  { moeda: "SOL", tempo: "1h", limite: 20 },
+  { moeda: "DOGE", tempo: "1h", limite: 20 },
+  { moeda: "PEPE", tempo: "15m", limite: 20 },
+  { moeda: "ADA", tempo: "1h", limite: 20 },
+  { moeda: "LINK", tempo: "1h", limite: 25 },
+];
+
+function calcRsi(c: number[], n = 14) {
+  if (c.length <= n) return null;
+  let g = 0, l = 0;
+  for (let i = 1; i <= n; i++) { const d = c[i] - c[i - 1]; if (d > 0) g += d; else l -= d; }
+  g /= n; l /= n;
+  for (let i = n + 1; i < c.length; i++) {
+    const d = c[i] - c[i - 1];
+    g = (g * (n - 1) + (d > 0 ? d : 0)) / n;
+    l = (l * (n - 1) + (d < 0 ? -d : 0)) / n;
+  }
+  return l === 0 ? 100 : 100 - 100 / (1 + g / l);
+}
+
+// RSI de cada robô agora, no gráfico que ele usa (só as velas já fechadas, como o robô)
+function SinaisCard({ r, t, s }: { r: ContaReal; t: Tema; s: Estilos }) {
+  const [dados, setDados] = useState<Record<string, { rsi: number | null; preco: number }>>({});
+  const [quando, setQuando] = useState<number | null>(null);
+  useEffect(() => {
+    let vivo = true;
+    const ler = async () => {
+      const out: Record<string, { rsi: number | null; preco: number }> = {};
+      await Promise.all(ROBOS.map(async (b) => {
+        try {
+          const v = await buscarVelas(b.moeda + "USDT", b.tempo, 200);
+          const fechadas = v.slice(0, -1).map((x) => x.c);
+          out[b.moeda] = { rsi: calcRsi(fechadas), preco: v[v.length - 1].c };
+        } catch {}
+      }));
+      if (vivo) { setDados(out); setQuando(Date.now()); }
+    };
+    ler();
+    const id = setInterval(ler, 60000);
+    return () => { vivo = false; clearInterval(id); };
+  }, []);
   return (
     <View style={[s.painel, s.cartao]}>
       <View style={s.linhaEntre}>
-        <Text style={s.cartaoTitulo}>Sinais agora</Text>
-        <Text style={s.textoSuave}>{dataHora(c.atualizado_em)}</Text>
+        <Text style={s.cartaoTitulo}>Régua de compra</Text>
+        <Text style={s.textoSuave}>{quando ? dataHora(quando) : ""}</Text>
       </View>
-      <Text style={s.textoSuave}>RSI 14 · vela de 1 hora</Text>
       <View style={{ gap: 10 }}>
-        {pares.map((p) => {
-          const v = rsis[p];
-          const sinal = v == null ? "-" : v < 30 ? "Sinal de compra" : v > 70 ? "Sinal de venda" : "Sem sinal";
-          const cor = v == null ? t.suave : v < 30 ? t.alta : v > 70 ? t.baixa : t.suave;
+        {ROBOS.map((b) => {
+          const d = dados[b.moeda];
+          const v = d?.rsi ?? null;
+          const comprado = !!r.posicoes[b.moeda];
+          const perto = v != null && v < b.limite + 5;
+          const sinal = comprado ? "Comprado" : v == null ? "-" : v < b.limite ? "Comprando" : perto ? "Quase" : "Esperando";
+          const cor = comprado ? t.acento : v == null ? t.suave : v < b.limite ? t.alta : perto ? t.acento : t.suave;
           return (
-            <View key={p} style={[s.indicador, { gap: 6 }]}>
+            <View key={b.moeda} style={[s.indicador, { gap: 6 }]}>
+              <Text style={[s.textoNormal, { fontWeight: "700" }]}>{b.moeda} <Text style={s.textoSuave}>· {b.tempo === "15m" ? "15 min" : "1 hora"} · compra abaixo de {b.limite}</Text></Text>
               <View style={s.linhaEntre}>
-                <Text style={[s.textoNormal, { fontWeight: "700" }]}>{nomeMoeda(p)}</Text>
-                <Text style={s.textoNormal}>{dinheiro(precos[p])}</Text>
-              </View>
-              <View style={s.linhaEntre}>
-                <Text style={s.textoSuave}>RSI {numero(v, 1)}</Text>
+                <Text style={s.textoSuave}>RSI {numero(v, 1)}{d ? ` · ${preco(d.preco)}` : ""}</Text>
                 <Text style={[s.textoSuave, { color: cor, fontWeight: "700" }]}>{sinal}</Text>
               </View>
               <View style={s.barra}>
-                <View style={[s.barraZona, { left: 0, width: "30%", backgroundColor: t.altaFraca }]} />
-                <View style={[s.barraZona, { left: "70%", width: "30%", backgroundColor: t.baixaFraca }]} />
+                <View style={[s.barraZona, { left: 0, width: `${b.limite}%`, backgroundColor: t.altaFraca }]} />
                 {v != null && <View style={[s.barraMarca, { left: `${Math.max(0, Math.min(100, v))}%`, backgroundColor: t.acento }]} />}
-              </View>
-              <View style={{ flexDirection: "row" }}>
-                <Text style={[s.miudo, { width: "30%", color: t.alta }]}>Zona de compra</Text>
-                <Text style={[s.miudo, { width: "40%", textAlign: "center" }]}>Meio</Text>
-                <Text style={[s.miudo, { width: "30%", textAlign: "right", color: t.baixa }]}>Caro demais</Text>
               </View>
             </View>
           );
         })}
       </View>
-      <Text style={s.regra}>O tracinho laranja é o RSI da moeda agora. Quando ele entra na parte verde (abaixo de 30), a moeda caiu bastante e o bot dela compra. Depois vende quando der 2,9% de lucro.</Text>
+      <Text style={s.regra}>O tracinho laranja é o RSI da moeda agora. Quando ele entra na parte verde, o robô dela compra. Depois vende sozinho no lucro alvo.</Text>
     </View>
   );
 }

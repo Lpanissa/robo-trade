@@ -173,7 +173,7 @@ function PosicoesCard({ r, t, s, oculto, aoTocar }: { r: ContaReal; t: Tema; s: 
           <View style={{ flexDirection: "row", alignItems: "center", gap: 8, flex: 1 }}>
             <View style={[s.ponto, { backgroundColor: p.res >= 0 ? t.alta : t.baixa }]} />
             <Text style={[s.textoNormal, { fontWeight: "600" }]}>{nomeMoeda(p.moeda + "USDT")}</Text>
-            <Text style={s.textoSuave}>a {preco(p.pos.preco_medio)}</Text>
+            <Text style={s.textoSuave}>a {preco(p.pos.preco_medio)} · há {tempoAberto(p.pos.desde)}</Text>
           </View>
           <Text style={[s.textoNormal, { fontWeight: "700", color: corDoNumero(t, Math.round(p.res * 100) / 100) }]}>
             {pct(p.res)}{oculto ? "" : ` · ${p.ganho >= 0 ? "+" : "-"}${reais(Math.abs(p.ganho) * brl)}`}
@@ -235,7 +235,7 @@ function GraficoCard({ r, t, s, oculto, par, setPar }: { r: ContaReal; t: Tema; 
             <Text style={[s.numero, { color: corDoNumero(t, resultado) }]}>{pct(resultado)}</Text>
           </View>
           <View style={s.linhaEntre}>
-            <Text style={s.textoSuave}>{oculto ? "••••" : `${numero(pos.qtd, pos.qtd >= 1000 ? 0 : 6)} ${moeda}`}</Text>
+            <Text style={s.textoSuave}>{oculto ? "••••" : `${numero(pos.qtd, pos.qtd >= 1000 ? 0 : 6)} ${moeda}`} · aberta há {tempoAberto(pos.desde)}</Text>
             <Text style={[s.textoNormal, { color: corDoNumero(t, ganhoUsd) }]}>
               {ganhoUsd == null || oculto ? "••••" : `${ganhoUsd >= 0 ? "+" : "-"}${reais(Math.abs(ganhoUsd) * brl)}`}
             </Text>
@@ -564,6 +564,16 @@ function preco(n: number | null | undefined) {
   if (n >= 1) return dinheiro(n);
   const casas = Math.min(10, Math.max(4, 2 - Math.floor(Math.log10(n)) + 1));
   return "US$ " + n.toLocaleString("pt-BR", { minimumFractionDigits: casas, maximumFractionDigits: casas });
+}
+
+// Há quanto tempo a compra está aberta: "45 min", "5h", "2d 14h"
+function tempoAberto(desde: number) {
+  const min = Math.max(0, Math.floor((Date.now() - desde) / 60000));
+  if (min < 60) return `${min} min`;
+  const h = Math.floor(min / 60);
+  if (h < 24) return `${h}h`;
+  const d = Math.floor(h / 24), r = h % 24;
+  return r ? `${d}d ${r}h` : `${d}d`;
 }
 
 function nomeMoeda(par: string) {

@@ -11,7 +11,7 @@
 //|     velas do próprio ativo e mostra as chances antes de entrar.   |
 //|  7. Zera tudo no fim do dia. Nunca dorme posicionado.             |
 //|                                                                  |
-//| Modo padrão: SÓ AVISA (você decide e opera). Teste sempre na demo.|
+//| Modo padrão: ENTRA SOZINHO, sem pedir permissão. Teste na demo.  |
 //| Em conta real ele fica parado enquanto PermitirContaReal = false. |
 //+------------------------------------------------------------------+
 #property copyright "PanissAsset"
@@ -33,7 +33,7 @@ enum TipoStop
 };
 
 //--- Configurações (aba "Entradas")
-input ModoRobo Modo               = SO_AVISAR;  // O que o robô faz no sinal
+input ModoRobo Modo               = OPERAR_SOZINHO; // O robô analisa e entra sozinho
 input string   HoraAbertura       = "09:00";    // Abertura do pregão
 input int      MinutosFaixa       = 15;         // Minutos da faixa de abertura (múltiplo de 5)
 input TipoStop Stop               = STOP_MEIO;  // Onde fica o stop

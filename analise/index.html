@@ -1,3 +1,4 @@
+<meta charset="utf-8">
 <title>Simulador PanissAsset</title>
 <meta name="claude:viewport-fit-sides" content="cover">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -132,6 +133,12 @@ tfoot td { border-bottom: none; font-weight: 600; }
     <div class="rolar"><table id="tabela"></table></div>
   </section>
 
+  <section class="bloco">
+    <div class="cab"><h2>Time Machine: os próximos 12 meses, 10.000 vezes</h2><span class="dica">semente 19</span></div>
+    <p class="nota">Pega cada venda real do período escolhido (alvo ou stop) e sorteia 10.000 anos seguintes com elas. Mostra quanto o alvo precisa acertar para empatar com esse stop, a chance de terminar o ano no prejuízo e a faixa onde caem 90% dos resultados. É simulação com o próprio histórico, não previsão.</p>
+    <div class="rolar"><table id="tm"></table></div>
+  </section>
+
   <p class="nota" id="nota"></p>
 </div>
 
@@ -175,7 +182,7 @@ function simular(d, inicio, preso) {
   const alvo = st.alvo / 100, stop = st.comStop ? st.stop / 100 : 0;
   const lotes = st.regra === "lotes", maxl = lotes ? (st.maxl > 0 ? st.maxl : Infinity) : 1;
   let abertos = [];
-  const r = { compras: 0, vendas: 0, alvos: 0, stops: 0, lucro: 0, porMes: {}, maxPreso: 0, maisLongo: 0, inicioPreco: null, fimPreco: c[c.length - 1] };
+  const r = { trades: [], compras: 0, vendas: 0, alvos: 0, stops: 0, lucro: 0, porMes: {}, maxPreso: 0, maisLongo: 0, inicioPreco: null, fimPreco: c[c.length - 1] };
   for (let i = 15; i < c.length; i++) {
     const t = t0 + d.t[i] * passo;
     if (t < inicio) continue;
@@ -189,7 +196,7 @@ function simular(d, inicio, preso) {
         else if (h[i] >= p.preco * (1 + alvo)) { saida = p.preco * (1 + alvo); tipo = "alvo"; }
         if (saida) {
           const lucro = st.valor * liquido(p.preco, saida);
-          r.lucro += lucro; r.vendas++; r[tipo + "s"]++;
+          r.lucro += lucro; r.vendas++; r[tipo + "s"]++; r.trades.push(lucro);
           const m = (r.porMes[mesDe(t)] ??= { lucro: 0, vendas: 0, stops: 0 });
           m.lucro += lucro; m.vendas++; if (tipo === "stop") m.stops++;
           r.maisLongo = Math.max(r.maisLongo, t - p.t);
@@ -268,8 +275,48 @@ function mostrar(res, pico, quando, dias) {
   const porMes = {};
   for (const r of res) for (const [m, v] of Object.entries(r.porMes)) { const p = (porMes[m] ??= { lucro: 0, vendas: 0, stops: 0 }); p.lucro += v.lucro; p.vendas += v.vendas; p.stops += v.stops; }
   desenhar(porMes);
+  timeMachine(res, dias);
   $("g-legenda").textContent = "Valores em USDT, somando as moedas escolhidas";
   $("nota").textContent = `Simulação com velas reais da Binance. Em "1 compra por vez" o robô compra quando o RSI está abaixo de ${st.rsi} no fechamento da vela e só volta a comprar depois de vender. Em "Várias compras" ele compra um novo lote cada vez que o RSI entra abaixo de ${st.rsi}, e cada lote vende sozinho no alvo. "Dinheiro necessário" é o máximo que ficou preso ao mesmo tempo somando as moedas. Se o alvo e o stop acontecem na mesma vela, conta como stop. Resultado passado não garante resultado futuro.`;
+}
+
+// ---------- Time Machine (ideia do day-trader-skill) ----------
+// sorteio repetível: mesma semente, mesmos números
+function sorteador(semente) {
+  let a = semente >>> 0;
+  return () => { a = (a + 0x6D2B79F5) >>> 0; let t = a; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+}
+function timeMachine(res, dias) {
+  const N = 10000;
+  // acerto necessário para empatar: perda no stop / (ganho no alvo + perda no stop), já com taxas
+  const ganho = liquido(1, 1 + st.alvo / 100), perda = st.comStop ? -liquido(1, 1 - st.stop / 100) : 0;
+  const empate = st.comStop ? (100 * perda) / (ganho + perda) : 0;
+  const linhas = res.map((r) => {
+    const n = r.trades.length;
+    if (n < 5) return `<tr><td>${NOMES[r.par]}</td><td colspan="6" style="text-align:left;color:var(--suave)">Poucas vendas no período (${n}) para simular</td></tr>`;
+    const porAno = Math.max(1, Math.round((n * 365) / dias));
+    const rnd = sorteador(19);
+    const fins = new Float64Array(N);
+    let negativos = 0;
+    for (let k = 0; k < N; k++) {
+      let s = 0;
+      for (let j = 0; j < porAno; j++) s += r.trades[Math.floor(rnd() * n)];
+      fins[k] = s; if (s < 0) negativos++;
+    }
+    fins.sort();
+    const q = (p) => fins[Math.min(N - 1, Math.floor(p * N))];
+    const acerto = (100 * r.alvos) / n;
+    const folga = acerto - empate;
+    let veredito, cor;
+    if (!st.comStop) { veredito = "Sem stop: perda fica presa até voltar"; cor = "avi"; }
+    else if (Math.abs(folga) < 5) { veredito = "Perto do empate"; cor = "avi"; }
+    else if (folga >= 15) { veredito = "Forte a favor do alvo"; cor = "pos"; }
+    else if (folga > 0) { veredito = "Puxa para o alvo"; cor = "pos"; }
+    else if (folga <= -15) { veredito = "Forte a favor do stop"; cor = "neg"; }
+    else { veredito = "Puxa para o stop"; cor = "neg"; }
+    return `<tr><td>${NOMES[r.par]}</td><td>${fmt(acerto, 0)}%</td><td>${st.comStop ? fmt(empate, 0) + "%" : "-"}</td><td class="${cor}" style="font-family:var(--f-texto)">${veredito}</td><td class="${negativos / N > 0.3 ? "neg" : negativos / N > 0.1 ? "avi" : ""}">${fmt((100 * negativos) / N, 1)}%</td><td class="${classe(q(0.5))}">${sinal(q(0.5))}</td><td>${sinal(q(0.05))} a ${sinal(q(0.95))}</td></tr>`;
+  }).join("");
+  $("tm").innerHTML = `<thead><tr><th>Moeda</th><th>Acertou o alvo</th><th>Precisa acertar</th><th>Veredito</th><th>Ano no prejuízo</th><th>Ano típico (USDT)</th><th>90% dos anos</th></tr></thead><tbody>${linhas}</tbody>`;
 }
 
 function desenhar(porMes) {
